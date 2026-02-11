@@ -1,4 +1,4 @@
-// Moborr.io client — WASD movement with prediction + reconciliation + interpolation
+// Moborr.io client — WASD movement with prediction + reconciliation
 // Default backend URL (unchanged)
 const DEFAULT_BACKEND = 'https://moborr-io-backend.onrender.com';
 
@@ -59,9 +59,18 @@ function setLoadingError(text) {
   loadingMain.textContent = 'Connection error';
   loadingSub.textContent = text || '';
   loadingUsername.textContent = '';
+  loadingScreen.classList.remove('hidden');
 }
 function hideLoading() {
   loadingScreen.classList.add('hidden');
+}
+
+// Helper: are we typing in a text field? If so, don't treat movement keys as gameplay input.
+function isTyping() {
+  const ae = document.activeElement;
+  if (!ae) return false;
+  const tag = (ae.tagName || '').toLowerCase();
+  return tag === 'input' || tag === 'textarea' || ae.isContentEditable;
 }
 
 // Camera / viewport
@@ -168,10 +177,6 @@ function setupSocket(username, serverUrl) {
       }
     }
   });
-
-  socket.on('connect', () => {
-    // keep input loop started only after world ready (we start it after currentPlayers)
-  });
 }
 
 // apply input to a state (prediction)
@@ -216,11 +221,14 @@ usernameInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') joinBt
 
 // keyboard
 window.addEventListener('keydown', (e) => {
+  // If the user is typing in an input/textarea, don't intercept movement keys.
+  if (isTyping()) return;
   if (['w','a','s','d','ArrowUp','ArrowLeft','ArrowDown','ArrowRight'].includes(e.key)) {
     keys[e.key] = true; e.preventDefault();
   }
 });
 window.addEventListener('keyup', (e) => {
+  if (isTyping()) return;
   if (['w','a','s','d','ArrowUp','ArrowLeft','ArrowDown','ArrowRight'].includes(e.key)) {
     keys[e.key] = false; e.preventDefault();
   }
@@ -328,6 +336,8 @@ requestAnimationFrame(render);
 
 // on load focus username and update viewport
 window.addEventListener('load', () => {
+  // Defensive: make sure loading screen is hidden until player clicks Play
+  hideLoading();
   usernameInput.focus();
   resizeCanvas();
 });
