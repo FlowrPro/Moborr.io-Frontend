@@ -1,5 +1,7 @@
 // Moborr.io client — WASD movement with prediction + reconciliation + interpolation
-// Connects to configurable backend URL (set it on the title screen).
+// Default backend URL set to your Render service.
+const DEFAULT_BACKEND = 'https://moborr-io-backend.onrender.com';
+
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
 
@@ -42,7 +44,7 @@ function createInterp() {
 
 // --- Networking / Connect logic ---
 function getSavedServerUrl() {
-  return localStorage.getItem('moborr_serverUrl') || window.location.origin;
+  return localStorage.getItem('moborr_serverUrl') || DEFAULT_BACKEND;
 }
 function saveServerUrl(url) {
   localStorage.setItem('moborr_serverUrl', url);
@@ -58,11 +60,9 @@ function setStatus(text, visible = true) {
 // connect using chosen server url
 function setupSocket(username, serverUrl) {
   setStatus('Connecting…');
-  // ensure a URL is provided
-  if (!serverUrl) serverUrl = window.location.origin;
-  // Use websocket + polling fallback
+  if (!serverUrl) serverUrl = DEFAULT_BACKEND;
   try {
-    socket = io(serverUrl, { transports: ['websocket','polling'] });
+    socket = io(serverUrl, { transports: ['websocket', 'polling'] });
   } catch (err) {
     setStatus('Invalid server URL');
     console.error(err);
@@ -96,7 +96,6 @@ function setupSocket(username, serverUrl) {
       }
     });
     setStatus('Joined — ready', true);
-    // small delay, then hide title screen
     setTimeout(() => { titleScreen.classList.add('hidden'); setStatus('', false); }, 350);
   });
 
@@ -118,22 +117,16 @@ function setupSocket(username, serverUrl) {
       }
 
       if (sp.id === myId) {
-        // server authoritative position + reconciliation
         const serverSeq = sp.lastProcessedInput || 0;
         existing.x = sp.x; existing.y = sp.y; existing.vx = sp.vx; existing.vy = sp.vy;
-        // reconcile local predicted state
         localState.x = sp.x; localState.y = sp.y; localState.vx = sp.vx; localState.vy = sp.vy;
-        // drop processed inputs
         let i = 0;
         while (i < pendingInputs.length && pendingInputs[i].seq <= serverSeq) i++;
         pendingInputs.splice(0, i);
-        // reapply pending inputs
         for (const inpt of pendingInputs) applyInputToState(localState, inpt.input, inpt.dt);
-        // reflect on local player record for rendering
         const me = players.get(myId);
         if (me) { me.x = localState.x; me.y = localState.y; me.vx = localState.vx; me.vy = localState.vy; }
       } else {
-        // interpolation for remote players
         const interp = existing.interp || createInterp();
         interp.startX = existing.x; interp.startY = existing.y;
         interp.targetX = sp.x; interp.targetY = sp.y;
@@ -144,7 +137,6 @@ function setupSocket(username, serverUrl) {
     }
   });
 
-  // once connected, start input loop
   socket.on('connect', () => startInputLoop());
 }
 
@@ -266,10 +258,9 @@ function render() {
 }
 render();
 
-// on load: populate server URL input from localStorage or origin
+// on load: populate server URL input from localStorage or default backend
 window.addEventListener('load', () => {
   serverUrlInput.value = getSavedServerUrl();
-  // focus username
   usernameInput.focus();
 });
 
