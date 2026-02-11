@@ -10,7 +10,6 @@ const joinBtn = document.getElementById('joinBtn');
 const usernameInput = document.getElementById('username');
 const connectStatusEl = document.getElementById('connectStatus');
 
-// The loading overlay is created dynamically only after Play is clicked.
 let loadingScreen = null;
 
 let socket = null;
@@ -144,9 +143,99 @@ function resizeCanvas() {
   canvas.width = viewPixels.w;
   canvas.height = viewPixels.h;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0); // work in CSS pixels
+
+  // regenerate grass pattern when DPI or size changes
+  createGrassPattern();
 }
 window.addEventListener('resize', resizeCanvas);
 resizeCanvas();
+
+// --- Grass background pattern ---
+// We'll create an offscreen canvas pattern that looks like small grassy blades.
+// The pattern is anchored to world coordinates so it scrolls with the camera.
+let grassPattern = null;
+let grassPatternSize = 128;
+function createGrassPattern() {
+  grassPatternSize = Math.max(64, Math.round(Math.min(160, 128 * (dpr || 1))));
+  const c = document.createElement('canvas');
+  c.width = grassPatternSize;
+  c.height = grassPatternSize;
+  const g = c.getContext('2d');
+
+  // base green
+  g.fillStyle = '#4aa04a'; // mid green
+  g.fillRect(0, 0, c.width, c.height);
+
+  // subtle darker stripes
+  g.fillStyle = 'rgba(38, 94, 38, 0.06)';
+  for (let i = 0; i < 6; i++) {
+    const y = Math.random() * c.height;
+    g.fillRect(0, y, c.width, 1 + Math.random() * 2);
+  }
+
+  // draw blades
+  for (let i = 0; i < c.width * c.height / 120; i++) {
+    const x = Math.random() * c.width;
+    const y = Math.random() * c.height;
+    const h = 6 + Math.random() * 18;
+    const sway = (Math.random() - 0.5) * 6;
+    const light = Math.random() * 20 + 20;
+    g.strokeStyle = `rgba(${20 + light},${80 + light},${20 + light},${0.85 + Math.random() * 0.15})`;
+    g.lineWidth = 1;
+    g.beginPath();
+    g.moveTo(x, y);
+    g.quadraticCurveTo(x + sway, y - h / 2, x + sway * 1.4, y - h);
+    g.stroke();
+  }
+
+  // occasional flowers/dots for variety
+  for (let i = 0; i < 8; i++) {
+    g.fillStyle = ['#ffd24a', '#ffe08b', '#ffd1e6'][Math.floor(Math.random() * 3)];
+    g.beginPath();
+    const x = Math.random() * c.width;
+    const y = Math.random() * c.height;
+    g.arc(x, y, 1 + Math.random() * 1.6, 0, Math.PI * 2);
+    g.fill();
+  }
+
+  grassPattern = ctx.createPattern(c, 'repeat');
+}
+
+// Background draw (replaces grid)
+function drawBackground(camX, camY, vw, vh) {
+  // fallback plain green if pattern isn't ready
+  if (!grassPattern) {
+    ctx.fillStyle = '#4aa04a';
+    ctx.fillRect(0, 0, vw, vh);
+    return;
+  }
+
+  // If pattern supports setTransform, offset the pattern to world coordinates so it scrolls with the map.
+  try {
+    if (typeof grassPattern.setTransform === 'function') {
+      // translate pattern by camera offset modulo pattern size to keep tiles aligned with world coords
+      const t = new DOMMatrix();
+      const ox = - (camX % grassPatternSize);
+      const oy = - (camY % grassPatternSize);
+      t.e = ox;
+      t.f = oy;
+      grassPattern.setTransform(t);
+    }
+  } catch (err) {
+    // ignore if not supported
+  }
+
+  ctx.fillStyle = grassPattern;
+  ctx.fillRect(0, 0, vw, vh);
+
+  // lightly darken far edges for vignette
+  const grad = ctx.createLinearGradient(0, 0, 0, vh);
+  grad.addColorStop(0, 'rgba(0,0,0,0.02)');
+  grad.addColorStop(0.5, 'rgba(0,0,0,0)');
+  grad.addColorStop(1, 'rgba(0,0,0,0.06)');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, vw, vh);
+}
 
 // networking
 function setupSocket(username, serverUrl) {
@@ -161,7 +250,6 @@ function setupSocket(username, serverUrl) {
 
   socket.on('connect', () => {
     myId = socket.id;
-    // update loading overlay text if present
     if (loadingScreen) {
       const main = loadingScreen.querySelector('#loading-main');
       const sub = loadingScreen.querySelector('#loading-sub');
@@ -316,36 +404,6 @@ function worldToScreen(wx, wy, camX, camY) {
   return { x: wx - camX, y: wy - camY };
 }
 
-function drawGrid(camX, camY, vw, vh) {
-  // background
-  ctx.fillStyle = '#07121a';
-  ctx.fillRect(0, 0, vw, vh);
-
-  // draw visible grid lines only
-  ctx.strokeStyle = 'rgba(255,255,255,0.03)';
-  ctx.lineWidth = 1;
-
-  const startX = Math.floor(camX / tileSize) * tileSize;
-  const endX = Math.ceil((camX + vw) / tileSize) * tileSize;
-  for (let x = startX; x <= endX; x += tileSize) {
-    const sx = Math.round(x - camX) + 0.5;
-    ctx.beginPath();
-    ctx.moveTo(sx, 0);
-    ctx.lineTo(sx, vh);
-    ctx.stroke();
-  }
-
-  const startY = Math.floor(camY / tileSize) * tileSize;
-  const endY = Math.ceil((camY + vh) / tileSize) * tileSize;
-  for (let y = startY; y <= endY; y += tileSize) {
-    const sy = Math.round(y - camY) + 0.5;
-    ctx.beginPath();
-    ctx.moveTo(0, sy);
-    ctx.lineTo(vw, sy);
-    ctx.stroke();
-  }
-}
-
 function drawPlayers(camX, camY, now) {
   for (const p of players.values()) {
     // compute screen position
@@ -392,6 +450,88 @@ function drawPlayers(camX, camY, now) {
   }
 }
 
+// Minimap
+function drawMinimap(camX, camY) {
+  // size: responsive but bounded
+  const maxSize = Math.min(260, Math.floor(viewport.w * 0.28));
+  const size = Math.max(120, maxSize);
+  const padding = 12;
+  const w = size;
+  const h = Math.round(size * (MAP.height / MAP.width)); // keep aspect relative to map (very wide map -> short minimap)
+  const mmW = w;
+  const mmH = Math.min(size, Math.max(80, h)); // clamp height
+
+  const x = viewport.w - mmW - padding;
+  const y = padding;
+
+  // background
+  ctx.save();
+  ctx.globalAlpha = 0.92;
+  ctx.fillStyle = 'rgba(10,20,10,0.66)'; // dark translucent
+  roundRect(ctx, x - 2, y - 2, mmW + 4, mmH + 4, 8);
+  ctx.fill();
+
+  // inner background (green-ish)
+  ctx.fillStyle = 'rgba(70,120,60,0.9)';
+  roundRect(ctx, x, y, mmW, mmH, 6);
+  ctx.fill();
+
+  // border
+  ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+  ctx.lineWidth = 1;
+  roundRect(ctx, x + 0.5, y + 0.5, mmW - 1, mmH - 1, 6);
+  ctx.stroke();
+
+  // draw players as dots
+  for (const p of players.values()) {
+    const px = x + (p.x / MAP.width) * mmW;
+    const py = y + (p.y / MAP.height) * mmH;
+
+    if (p.id === myId) {
+      // my player: yellow dot with small halo
+      ctx.beginPath();
+      ctx.fillStyle = '#ffe04a';
+      ctx.arc(px, py, 4.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.fillStyle = 'rgba(255,224,74,0.14)';
+      ctx.arc(px, py, 7.5, 0, Math.PI * 2);
+      ctx.fill();
+    } else {
+      ctx.beginPath();
+      ctx.fillStyle = '#bdbdbd';
+      ctx.arc(px, py, 3, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  // camera rectangle (where the viewport sits in the world)
+  const camRectX = x + (camX / MAP.width) * mmW;
+  const camRectY = y + (camY / MAP.height) * mmH;
+  const camRectW = Math.max(2, (viewport.w / MAP.width) * mmW);
+  const camRectH = Math.max(2, (viewport.h / MAP.height) * mmH);
+
+  ctx.beginPath();
+  ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+  ctx.lineWidth = 1.2;
+  ctx.rect(camRectX, camRectY, camRectW, camRectH);
+  ctx.stroke();
+
+  ctx.restore();
+}
+
+function roundRect(ctx, x, y, w, h, r) {
+  const rad = Math.min(r, w / 2, h / 2);
+  ctx.beginPath();
+  ctx.moveTo(x + rad, y);
+  ctx.arcTo(x + w, y, x + w, y + h, rad);
+  ctx.arcTo(x + w, y + h, x, y + h, rad);
+  ctx.arcTo(x, y + h, x, y, rad);
+  ctx.arcTo(x, y, x + w, y, rad);
+  ctx.closePath();
+}
+
+// Main render loop
 function render() {
   const now = Date.now();
   // camera centers on local player
@@ -403,8 +543,14 @@ function render() {
   const camX = Math.max(0, Math.min(MAP.width - viewport.w, cx));
   const camY = Math.max(0, Math.min(MAP.height - viewport.h, cy));
 
-  drawGrid(camX, camY, viewport.w, viewport.h);
+  // Draw background (grass)
+  drawBackground(camX, camY, viewport.w, viewport.h);
+
+  // Draw players
   drawPlayers(camX, camY, now);
+
+  // Draw minimap
+  drawMinimap(camX, camY);
 
   requestAnimationFrame(render);
 }
@@ -412,7 +558,6 @@ requestAnimationFrame(render);
 
 // on load focus username and update viewport
 window.addEventListener('load', () => {
-  // No loading overlay on load — it will be created only after Play is clicked
   usernameInput.focus();
   resizeCanvas();
 });
