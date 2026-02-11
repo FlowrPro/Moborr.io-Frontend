@@ -25,14 +25,17 @@
     </div>
   </div>
 
-  <!-- Loading screen (separate actual screen) -->
+  <!-- Loading screen: hidden by default, shows only after Play -->
   <div id="loading-screen" class="loading-screen hidden" role="status" aria-live="polite" aria-label="Loading">
     <div class="loading-inner">
-      <div class="loading-title">Loading</div>
-      <div class="loading-bar-wrap" aria-hidden="false">
-        <div id="loading-bar" class="loading-bar"></div>
+      <div class="avatar">
+        <div class="eye left"></div>
+        <div class="eye right"></div>
       </div>
-      <div id="loading-text" class="loading-text">Initializing…</div>
+
+      <div class="loading-title" id="loading-main">Connecting...</div>
+      <div class="loading-sub" id="loading-sub">Preparing the world</div>
+      <div class="loading-username" id="loading-username"></div>
     </div>
   </div>
 
