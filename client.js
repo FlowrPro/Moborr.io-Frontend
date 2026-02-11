@@ -11,8 +11,9 @@ const usernameInput = document.getElementById('username');
 const connectStatusEl = document.getElementById('connectStatus');
 
 const loadingScreen = document.getElementById('loading-screen');
-const loadingBar = document.getElementById('loading-bar');
-const loadingText = document.getElementById('loading-text');
+const loadingMain = document.getElementById('loading-main');
+const loadingSub = document.getElementById('loading-sub');
+const loadingUsername = document.getElementById('loading-username');
 
 let socket = null;
 let myId = null;
@@ -46,18 +47,21 @@ function createInterp() {
   return { targetX: 0, targetY: 0, startX: 0, startY: 0, startTime: 0, endTime: 0 };
 }
 
-// simple loading UI helpers
-function showLoading() {
-  loadingBar.style.width = '0%';
-  loadingText.textContent = 'Initializing…';
+// Loading UI helpers
+function showLoading(username) {
+  // set texts
+  loadingMain.textContent = 'Connecting...';
+  loadingSub.textContent = 'Preparing the world';
+  loadingUsername.textContent = username || '';
   loadingScreen.classList.remove('hidden');
+}
+function setLoadingError(text) {
+  loadingMain.textContent = 'Connection error';
+  loadingSub.textContent = text || '';
+  loadingUsername.textContent = '';
 }
 function hideLoading() {
   loadingScreen.classList.add('hidden');
-}
-function setLoadingProgress(percent, text) {
-  loadingBar.style.width = `${Math.max(0, Math.min(100, percent))}%`;
-  if (typeof text === 'string') loadingText.textContent = text;
 }
 
 // Camera / viewport
@@ -86,33 +90,28 @@ function setupSocket(username, serverUrl) {
     socket = io(serverUrl, { transports: ['websocket', 'polling'] });
   } catch (err) {
     console.error('Socket init failed', err);
-    setLoadingProgress(0, 'Invalid server URL');
+    setLoadingError('Invalid server URL');
     return;
   }
 
-  // start with small progress
-  setLoadingProgress(12, 'Connecting to server…');
-
   socket.on('connect', () => {
     myId = socket.id;
-    setLoadingProgress(40, 'Connected — joining…');
+    loadingMain.textContent = 'Connected';
+    loadingSub.textContent = 'Receiving world…';
     socket.emit('join', username);
   });
 
   socket.on('connect_error', (err) => {
     console.warn('connect_error', err);
-    setLoadingProgress(1, 'Connection failed — check server/CORS');
+    setLoadingError('Connection failed — check server/CORS');
   });
 
   socket.on('disconnect', (reason) => {
     console.warn('disconnected', reason);
-    setLoadingProgress(1, 'Disconnected from server');
+    setLoadingError('Disconnected from server');
   });
 
   socket.on('currentPlayers', (list) => {
-    // treat receiving currentPlayers as major load step
-    setLoadingProgress(70, 'Receiving world data…');
-
     players.clear();
     list.forEach(p => {
       players.set(p.id, {
@@ -123,17 +122,13 @@ function setupSocket(username, serverUrl) {
       }
     });
 
-    // final steps: small delay for polish, then finish loading
-    setLoadingProgress(92, 'Finalizing…');
+    // finalize and enter game
+    loadingMain.textContent = 'Ready';
+    loadingSub.textContent = '';
     setTimeout(() => {
-      setLoadingProgress(100, 'Ready');
-      // hide loading and start input loop after a short fade
-      setTimeout(() => {
-        hideLoading();
-        // Start sending inputs once loading is done
-        startInputLoop();
-      }, 220);
-    }, 300);
+      hideLoading();
+      startInputLoop();
+    }, 220);
   });
 
   socket.on('newPlayer', (p) => {
@@ -173,6 +168,10 @@ function setupSocket(username, serverUrl) {
       }
     }
   });
+
+  socket.on('connect', () => {
+    // keep input loop started only after world ready (we start it after currentPlayers)
+  });
 }
 
 // apply input to a state (prediction)
@@ -208,9 +207,8 @@ joinBtn.addEventListener('click', () => {
   const name = (usernameInput.value || 'Player').trim();
   if (!name) return;
   // show loading screen and begin the connection process
-  titleScreen.classList.add('hidden'); // move to loading screen visually (title hidden immediately)
-  showLoading();
-  setLoadingProgress(8, 'Preparing…');
+  titleScreen.classList.add('hidden'); // hide title
+  showLoading(name);
   setupSocket(name, DEFAULT_BACKEND);
 });
 
