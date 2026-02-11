@@ -9,7 +9,7 @@
   --accent-button: linear-gradient(180deg, #1fb3a9, #0f6670);
   --muted: #cdbdae;
   --input-bg: rgba(0,0,0,0.25);
-  --loading-accent: #0fe6c4;
+  --loading-accent: #ffd24a; /* gold for avatar contrast */
   --loading-bg: rgba(0,0,0,0.22);
 }
 
@@ -143,7 +143,7 @@ canvas{
 /* hide title screen when game is active */
 .hidden{display:none}
 
-/* Loading screen: full-screen, centered */
+/* Loading screen: full-screen, centered; matches provided design */
 .loading-screen{
   position:fixed;
   inset:0;
@@ -164,39 +164,60 @@ canvas{
   gap:18px;
 }
 
+/* avatar circle with eyes */
+.avatar{
+  width:170px;
+  height:170px;
+  border-radius:50%;
+  background: var(--loading-accent);
+  box-shadow:
+    0 40px 50px rgba(0,0,0,0.45),
+    0 8px 28px rgba(0,0,0,0.28),
+    inset -6px -6px 18px rgba(0,0,0,0.06);
+  position:relative;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+}
+
+/* eyes */
+.eye{
+  width:22px;
+  height:22px;
+  background: #fff;
+  border-radius:50%;
+  position:absolute;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.18);
+}
+.eye::after{
+  content:'';
+  position:absolute;
+  width:10px;
+  height:10px;
+  background:#000;
+  border-radius:50%;
+  left:6px;
+  top:6px;
+}
+.eye.left{ transform: translateX(-22px); }
+.eye.right{ transform: translateX(22px); }
+
+/* loading text */
 .loading-title{
-  font-size:42px;
-  letter-spacing:3px;
-  color:var(--loading-accent);
-  text-shadow: 0 8px 40px rgba(15,230,196,0.18);
+  font-size:20px;
   font-weight:800;
+  color: #fff;
+  letter-spacing:0.6px;
 }
-
-/* progress bar container */
-.loading-bar-wrap{
-  width:100%;
-  height:18px;
-  background:var(--loading-bg);
-  border-radius:12px;
-  padding:3px;
-  box-shadow: inset 0 1px 0 rgba(255,255,255,0.02);
+.loading-sub{
+  font-size:13px;
+  color: rgba(255,255,255,0.85);
 }
-
-/* actual bar (animated width) */
-.loading-bar{
-  width:0%;
-  height:100%;
-  border-radius:9px;
-  background: linear-gradient(90deg, rgba(21,230,196,0.95), rgba(10,170,150,0.9));
-  box-shadow: 0 6px 24px rgba(15,230,196,0.16);
-  transition: width 220ms cubic-bezier(.2,.9,.2,1);
-}
-
-/* loading text under bar */
-.loading-text{
-  color: rgba(220,220,210,0.92);
-  font-size:14px;
-  text-align:center;
+.loading-username{
+  margin-top:6px;
+  font-weight:700;
+  color:#fff;
+  opacity:0.95;
 }
 
 /* responsive tweaks */
@@ -205,5 +226,6 @@ canvas{
   .game-title{font-size:44px}
   .name-input{height:48px}
   .play-btn{height:48px;font-size:16px}
-  .loading-title{font-size:28px}
+  .avatar{width:120px;height:120px}
+  .loading-title{font-size:18px}
 }
