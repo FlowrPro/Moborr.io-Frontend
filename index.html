@@ -25,19 +25,7 @@
     </div>
   </div>
 
-  <!-- Loading screen: hidden by default, shows only after Play -->
-  <div id="loading-screen" class="loading-screen hidden" role="status" aria-live="polite" aria-label="Loading">
-    <div class="loading-inner">
-      <div class="avatar">
-        <div class="eye left"></div>
-        <div class="eye right"></div>
-      </div>
-
-      <div class="loading-title" id="loading-main">Connecting...</div>
-      <div class="loading-sub" id="loading-sub">Preparing the world</div>
-      <div class="loading-username" id="loading-username"></div>
-    </div>
-  </div>
+  <!-- Note: loading screen removed from initial markup. It will be created dynamically by client.js when Play is clicked. -->
 
   <canvas id="gameCanvas"></canvas>
 
