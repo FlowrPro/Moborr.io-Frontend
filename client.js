@@ -1,4 +1,4 @@
-// Moborr.io client — WASD movement with prediction + reconciliation + smoothing & custom avatar
+// Moborr.io client — WASD movement with prediction + reconciliation + smoothing, avatar bob & blink
 // Default backend URL (unchanged)
 const DEFAULT_BACKEND = 'https://moborr-io-backend.onrender.com';
 
@@ -15,20 +15,22 @@ let loadingScreen = null;
 let socket = null;
 let myId = null;
 
-const players = new Map(); // id -> { id, username, x, y, vx, vy, color, interp, dispX, dispY }
+const players = new Map(); // id -> { id, username, x, y, vx, vy, color, interp, dispX, dispY, _bobPhase, _nextBlink, _blinkTime }
 const pendingInputs = [];
 
 // INPUT / NETWORK RATES
-// Increased send rate so input arrives frequently and prediction is smoother.
-// NOTE: server snapshot rate was increased to 30Hz; we send inputs at 60Hz for responsive control.
+// Send inputs frequently for responsive control.
 const SEND_RATE = 60; // inputs per second
 const INPUT_DT = 1 / SEND_RATE;
 
-// This value should match server TICK_RATE for interpolation heuristic (server.js uses 30)
+// Server tick rate (should match server.js) used for interpolation heuristics
 const SERVER_TICK_RATE = 30;
 
 // Movement speed (must match server)
-const SPEED = 180; // px/sec
+const SPEED = 260; // px/sec (matched to server)
+
+// Avatar size (bigger, not smooshed)
+const PLAYER_RADIUS = 26; // larger; similar to florr.io character size
 
 // BIG map: 12000 x 12000 (must match server)
 const MAP = { width: 12000, height: 12000, padding: 16 };
@@ -53,7 +55,7 @@ function createInterp() {
   return { targetX: 0, targetY: 0, startX: 0, startY: 0, startTime: 0, endTime: 0 };
 }
 
-// --- Grass pattern variables (reuse from your previous working file) ---
+// --- Grass pattern variables (reuse) ---
 let grassPattern = null;
 let grassPatternSize = 128;
 
@@ -113,7 +115,6 @@ function showLoading(username) {
   if (sub) sub.textContent = 'Preparing the world';
   if (uname) uname.textContent = username || '';
 
-  // attach to body if not already
   if (!document.body.contains(loadingScreen)) document.body.appendChild(loadingScreen);
 }
 function setLoadingError(text) {
@@ -137,7 +138,6 @@ function isTyping() {
   const ae = document.activeElement;
   if (!ae) return false;
   const tag = (ae.tagName || '').toLowerCase();
-  // consider inputs, textareas, and contenteditable elements as typing targets
   return tag === 'input' || tag === 'textarea' || ae.isContentEditable;
 }
 
@@ -212,17 +212,14 @@ function createGrassPattern() {
 
 // Background draw (replaces grid)
 function drawBackground(camX, camY, vw, vh) {
-  // fallback plain green if pattern isn't ready
   if (!grassPattern) {
     ctx.fillStyle = '#4aa04a';
     ctx.fillRect(0, 0, vw, vh);
     return;
   }
 
-  // If pattern supports setTransform, offset the pattern to world coordinates so it scrolls with the map.
   try {
     if (typeof grassPattern.setTransform === 'function') {
-      // translate pattern by camera offset modulo pattern size to keep tiles aligned with world coords
       const t = new DOMMatrix();
       const ox = - (camX % grassPatternSize);
       const oy = - (camY % grassPatternSize);
@@ -237,7 +234,6 @@ function drawBackground(camX, camY, vw, vh) {
   ctx.fillStyle = grassPattern;
   ctx.fillRect(0, 0, vw, vh);
 
-  // lightly darken far edges for vignette
   const grad = ctx.createLinearGradient(0, 0, 0, vh);
   grad.addColorStop(0, 'rgba(0,0,0,0.02)');
   grad.addColorStop(0.5, 'rgba(0,0,0,0)');
@@ -291,14 +287,16 @@ function setupSocket(username, serverUrl) {
         color: p.color || '#29a',
         interp: createInterp(),
         dispX: p.x,
-        dispY: p.y
+        dispY: p.y,
+        _bobPhase: Math.random() * Math.PI * 2,
+        _nextBlink: 1 + Math.random() * 4,
+        _blinkTime: 0
       });
       if (p.id === myId) {
         localState.x = p.x; localState.y = p.y; localState.vx = p.vx || 0; localState.vy = p.vy || 0;
       }
     });
 
-    // finalize and enter game
     if (loadingScreen) {
       const main = loadingScreen.querySelector('#loading-main');
       const sub = loadingScreen.querySelector('#loading-sub');
@@ -323,7 +321,10 @@ function setupSocket(username, serverUrl) {
       color: p.color || '#29a',
       interp: createInterp(),
       dispX: p.x,
-      dispY: p.y
+      dispY: p.y,
+      _bobPhase: Math.random() * Math.PI * 2,
+      _nextBlink: 1 + Math.random() * 4,
+      _blinkTime: 0
     });
   });
 
@@ -346,7 +347,10 @@ function setupSocket(username, serverUrl) {
           color: sp.color || '#29a',
           interp: createInterp(),
           dispX: sp.x,
-          dispY: sp.y
+          dispY: sp.y,
+          _bobPhase: Math.random() * Math.PI * 2,
+          _nextBlink: 1 + Math.random() * 4,
+          _blinkTime: 0
         });
         continue;
       }
@@ -354,32 +358,21 @@ function setupSocket(username, serverUrl) {
       if (sp.id === myId) {
         // authoritative server position for me: reconcile
         const serverSeq = sp.lastProcessedInput || 0;
-        // update authoritative values
         existing.x = sp.x; existing.y = sp.y; existing.vx = sp.vx; existing.vy = sp.vy;
         localState.x = sp.x; localState.y = sp.y; localState.vx = sp.vx; localState.vy = sp.vy;
 
-        // remove acknowledged inputs and reapply pending (reconciliation)
         let i = 0;
         while (i < pendingInputs.length && pendingInputs[i].seq <= serverSeq) i++;
         pendingInputs.splice(0, i);
         for (const inpt of pendingInputs) applyInputToState(localState, inpt.input, inpt.dt);
 
-        // instead of snapping display position immediately, we'll let smoothing move it
-        const me = players.get(myId);
-        if (me) {
-          me.x = localState.x;
-          me.y = localState.y;
-          me.vx = localState.vx;
-          me.vy = localState.vy;
-          // keep existing.dispX/displY — smoothing will move displayed position toward authoritative
-        }
+        // keep display position (dispX, dispY) and allow smoothing to catch up
       } else {
         // remote player: set interpolation targets
         const interp = existing.interp || createInterp();
         interp.startX = existing.x; interp.startY = existing.y;
         interp.targetX = sp.x; interp.targetY = sp.y;
         interp.startTime = now;
-        // choose interpolation window slightly longer than the server snapshot period so animation is smooth
         interp.endTime = now + (1000 / SERVER_TICK_RATE) * 1.2;
         existing.vx = sp.vx; existing.vy = sp.vy;
         existing.x = sp.x;
@@ -390,7 +383,7 @@ function setupSocket(username, serverUrl) {
   });
 
   socket.on('connect', () => {
-    // keep input loop started only after world ready (we start it after currentPlayers)
+    // nothing here — input loop starts after currentPlayers
   });
 }
 
@@ -426,22 +419,20 @@ function stopInputLoop() {
 joinBtn.addEventListener('click', () => {
   const name = (usernameInput.value || 'Player').trim();
   if (!name) return;
-  // show loading screen and begin the connection process
-  titleScreen.classList.add('hidden'); // hide title
+  titleScreen.classList.add('hidden');
   showLoading(name);
   setupSocket(name, DEFAULT_BACKEND);
 });
 
-// ensure Enter works and don't let the global handlers see these key events
+// ensure Enter works and protect typing
 usernameInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') joinBtn.click();
-  // Stop propagation so window-level movement handlers won't intercept typing keys (W/A/S/D)
   e.stopPropagation();
 });
 usernameInput.addEventListener('keypress', (e) => e.stopPropagation());
 usernameInput.addEventListener('keyup', (e) => e.stopPropagation());
 
-// keyboard: ignore movement handling if the user is focused on a text field
+// keyboard: ignore movement handling if typing
 window.addEventListener('keydown', (e) => {
   if (isTyping()) return;
   if (['w','a','s','d','ArrowUp','ArrowLeft','ArrowDown','ArrowRight'].includes(e.key)) {
@@ -455,12 +446,11 @@ window.addEventListener('keyup', (e) => {
   }
 });
 
-// Rendering: camera follows local player; draw only what's visible
+// Rendering helpers
 let lastFrameTime = performance.now();
 
 // small helper for smoothing: exponential lerp toward target based on speed (units per second)
 function smoothApproach(current, target, dtSeconds, speed) {
-  // speed = how quickly we approach target (higher = snappier). We convert to lerp factor.
   const factor = 1 - Math.exp(-speed * dtSeconds);
   return current + (target - current) * factor;
 }
@@ -469,135 +459,166 @@ function worldToScreen(wx, wy, camX, camY) {
   return { x: wx - camX, y: wy - camY };
 }
 
-function drawPlayerAvatar(screenX, screenY, radius, p, isLocal) {
-  // replicate provided image: gold rim, green face, black oval eyes with white highlights, smiling mouth
-  const faceColor = '#17b84a'; // vivid green like image
+// draw an avatar similar to your image, with bobbing and blinking
+function drawPlayerAvatar(screenX, screenY, radius, p, isLocal, blinkClosedAmount, bobOffset) {
+  // colors tuned to match the image
+  const faceColor = '#17b84a'; // vivid green
   const outerGold = '#d3b34a';
   const innerGold = '#e6cf78';
 
   // outer rim
   ctx.beginPath();
   ctx.fillStyle = outerGold;
-  ctx.arc(screenX, screenY, radius + 6, 0, Math.PI * 2);
+  ctx.arc(screenX, screenY + bobOffset, radius + 8, 0, Math.PI * 2);
   ctx.fill();
 
   // inner rim (thin)
   ctx.beginPath();
   ctx.fillStyle = innerGold;
-  ctx.arc(screenX, screenY, radius + 3.5, 0, Math.PI * 2);
+  ctx.arc(screenX, screenY + bobOffset, radius + 4.5, 0, Math.PI * 2);
   ctx.fill();
 
   // face
   ctx.beginPath();
   ctx.fillStyle = faceColor;
-  ctx.arc(screenX, screenY, radius, 0, Math.PI * 2);
+  ctx.arc(screenX, screenY + bobOffset, radius, 0, Math.PI * 2);
   ctx.fill();
 
   // thin black outline
   ctx.beginPath();
   ctx.lineWidth = 2;
   ctx.strokeStyle = '#000';
-  ctx.arc(screenX, screenY, radius, 0, Math.PI * 2);
+  ctx.arc(screenX, screenY + bobOffset, radius, 0, Math.PI * 2);
   ctx.stroke();
 
-  // eyes (two vertical ovals)
-  const eyeOffsetX = Math.max(6, radius * 0.45);
-  const eyeOffsetY = -Math.max(4, radius * 0.15);
-  const eyeW = Math.max(6, radius * 0.45);
-  const eyeH = Math.max(10, radius * 0.7);
+  // eyes (vertical ovals)
+  const eyeOffsetX = Math.max(8, radius * 0.48);
+  const eyeOffsetY = -Math.max(6, radius * 0.18);
+  const eyeW = Math.max(8, radius * 0.48);
+  const eyeH = Math.max(12, radius * 0.8);
 
-  function drawEye(cx, cy) {
-    // black oval
+  function drawEye(cx, cy, closedAmount) {
+    // if closedAmount near 1 => eye fully closed
+    const visibleH = Math.max(0.6, 1 - closedAmount); // preserve tiny slit
+    // black oval (scaled vertically by visibleH)
     ctx.beginPath();
-    ctx.ellipse(cx, cy, eyeW * 0.5, eyeH * 0.5, 0, 0, Math.PI * 2);
+    ctx.ellipse(cx, cy, eyeW * 0.5, eyeH * 0.5 * visibleH, 0, 0, Math.PI * 2);
     ctx.fillStyle = '#000';
     ctx.fill();
 
-    // small white inner highlight (vertical oval)
-    ctx.beginPath();
-    ctx.ellipse(cx - eyeW * 0.18, cy - eyeH * 0.12, eyeW * 0.18, eyeH * 0.28, 0, 0, Math.PI * 2);
-    ctx.fillStyle = '#fff';
-    ctx.fill();
+    if (visibleH > 0.12) {
+      // small white inner highlight (vertical oval)
+      ctx.beginPath();
+      ctx.ellipse(cx - eyeW * 0.18, cy - eyeH * 0.16 * visibleH, eyeW * 0.18, eyeH * 0.28 * visibleH, 0, 0, Math.PI * 2);
+      ctx.fillStyle = '#fff';
+      ctx.fill();
+    }
 
-    // tiny yellow-ish rim inside (to match image's slight golden edge)
+    // gentle inner gold rim stroke for warmth
     ctx.beginPath();
-    ctx.ellipse(cx, cy, eyeW * 0.36, eyeH * 0.36, 0, 0, Math.PI * 2);
+    ctx.ellipse(cx, cy, eyeW * 0.36, eyeH * 0.36 * visibleH, 0, 0, Math.PI * 2);
     ctx.strokeStyle = 'rgba(255,220,120,0.08)';
     ctx.lineWidth = 1;
     ctx.stroke();
   }
 
-  drawEye(screenX - eyeOffsetX, screenY + eyeOffsetY);
-  drawEye(screenX + eyeOffsetX, screenY + eyeOffsetY);
+  drawEye(screenX - eyeOffsetX, screenY + eyeOffsetY + bobOffset, blinkClosedAmount);
+  drawEye(screenX + eyeOffsetX, screenY + eyeOffsetY + bobOffset, blinkClosedAmount);
 
-  // smile (simple curve)
+  // smile (curved)
   ctx.beginPath();
-  const smileRadius = radius * 0.55;
-  const smileY = screenY + radius * 0.25;
+  const smileRadius = radius * 0.60;
+  const smileY = screenY + radius * 0.28 + bobOffset;
   ctx.lineWidth = 3;
   ctx.strokeStyle = '#000';
   ctx.lineCap = 'round';
-  ctx.arc(screenX, smileY, smileRadius, Math.PI * 0.15, Math.PI * 0.85);
+  ctx.arc(screenX, smileY, smileRadius, Math.PI * 0.18, Math.PI * 0.82);
   ctx.stroke();
 
-  // interior smile highlight (thin yellow)
+  // interior smile highlight
   ctx.beginPath();
   ctx.lineWidth = 2;
   ctx.strokeStyle = '#ffd86a';
-  ctx.arc(screenX, smileY + 0.8, smileRadius * 0.96, Math.PI * 0.18, Math.PI * 0.82);
+  ctx.arc(screenX, smileY + 1.2, smileRadius * 0.96, Math.PI * 0.2, Math.PI * 0.8);
   ctx.stroke();
 }
 
+// Draw players and update bobbing/blink state
 function drawPlayers(camX, camY, now, dtSeconds) {
   for (const p of players.values()) {
-    // update displayed position (dispX, dispY) to smoothly approach target
+    // initialize properties if missing
+    if (p.dispX === undefined) p.dispX = p.x;
+    if (p.dispY === undefined) p.dispY = p.y;
+    if (p._bobPhase === undefined) p._bobPhase = Math.random() * Math.PI * 2;
+    if (p._nextBlink === undefined) p._nextBlink = 1 + Math.random() * 4;
+    if (p._blinkTime === undefined) p._blinkTime = 0;
+
+    // Update bobbing: advance phase when player is moving, decay when idle
+    const speed = Math.hypot(p.vx || 0, p.vy || 0);
+    const moveFactor = Math.min(1, speed / SPEED); // 0..1
+    const bobSpeed = 2.8 + moveFactor * 6.0; // faster when moving
+    p._bobPhase += dtSeconds * bobSpeed;
+    // amplitude in pixels (subtle)
+    const bobAmp = 1.5 + moveFactor * 4.0;
+    const bobOffset = Math.sin(p._bobPhase) * bobAmp;
+
+    // Blinking: count down to next blink, then animate a short blink
+    if (p._nextBlink > 0) {
+      p._nextBlink -= dtSeconds;
+    } else if (p._blinkTime <= 0) {
+      // start blink
+      p._blinkTime = 0.20; // blink total duration (sec)
+      p._nextBlink = 1.5 + Math.random() * 4.0; // schedule next blink
+    }
+
+    let blinkClosedAmount = 0;
+    if (p._blinkTime > 0) {
+      // progress 0..1 across blink duration
+      const elapsed = 0.20 - p._blinkTime;
+      const prog = Math.max(0, Math.min(1, elapsed / 0.20));
+      // eyelid closeness follows a sine shaped curve (quick close + open)
+      blinkClosedAmount = Math.sin(prog * Math.PI);
+      p._blinkTime -= dtSeconds;
+    }
+
+    // update displayed position (smoothing)
     if (p.id === myId) {
-      // local player: target is authoritative position (p.x,p.y) plus prediction from velocity
-      const predictedX = p.x + (p.vx || 0) * 0.025; // tiny predictive offset (25ms)
-      const predictedY = p.y + (p.vy || 0) * 0.025;
-      // Approach speed tuned for responsiveness but smoothness
-      p.dispX = smoothApproach(p.dispX, predictedX, dtSeconds, 18);
-      p.dispY = smoothApproach(p.dispY, predictedY, dtSeconds, 18);
+      const predictedX = p.x + (p.vx || 0) * 0.03;
+      const predictedY = p.y + (p.vy || 0) * 0.03;
+      p.dispX = smoothApproach(p.dispX, predictedX, dtSeconds, 20);
+      p.dispY = smoothApproach(p.dispY, predictedY, dtSeconds, 20);
     } else {
-      // remote players: use interpolation target if present, else use authoritative (fallback)
       if (p.interp) {
         const t = Math.max(0, Math.min(1, (now - p.interp.startTime) / Math.max(1, (p.interp.endTime - p.interp.startTime))));
-        const tt = t * t * (3 - 2 * t); // smoothstep
+        const tt = t * t * (3 - 2 * t);
         const targetX = p.interp.startX + (p.interp.targetX - p.interp.startX) * tt;
         const targetY = p.interp.startY + (p.interp.targetY - p.interp.startY) * tt;
-
-        // small velocity-based prediction if needed
-        const vx = p.vx || 0, vy = p.vy || 0;
-        const predictedX = targetX + vx * 0.025;
-        const predictedY = targetY + vy * 0.025;
-
-        // smoothing factor for remote players (slower than local)
-        p.dispX = smoothApproach(p.dispX, predictedX, dtSeconds, 8);
-        p.dispY = smoothApproach(p.dispY, predictedY, dtSeconds, 8);
+        // slight prediction
+        const predictedX = targetX + (p.vx || 0) * 0.03;
+        const predictedY = targetY + (p.vy || 0) * 0.03;
+        p.dispX = smoothApproach(p.dispX, predictedX, dtSeconds, 10);
+        p.dispY = smoothApproach(p.dispY, predictedY, dtSeconds, 10);
       } else {
-        // no interp info yet; approach authoritative directly
-        p.dispX = smoothApproach(p.dispX, p.x, dtSeconds, 8);
-        p.dispY = smoothApproach(p.dispY, p.y, dtSeconds, 8);
+        p.dispX = smoothApproach(p.dispX, p.x, dtSeconds, 10);
+        p.dispY = smoothApproach(p.dispY, p.y, dtSeconds, 10);
       }
     }
 
     const screen = worldToScreen(p.dispX, p.dispY, camX, camY);
-    // quick cull
-    if (screen.x < -100 || screen.x > viewport.w + 100 || screen.y < -100 || screen.y > viewport.h + 100) continue;
+    if (screen.x < -150 || screen.x > viewport.w + 150 || screen.y < -150 || screen.y > viewport.h + 150) continue;
 
-    // draw custom avatar
-    const radius = 18;
-    drawPlayerAvatar(screen.x, screen.y, radius, p, p.id === myId);
+    // draw avatar with bobbing & blink
+    drawPlayerAvatar(screen.x, screen.y, PLAYER_RADIUS, p, p.id === myId, blinkClosedAmount, Math.sin(p._bobPhase) * (1.5 + moveFactor * 3.0));
 
-    // name (slightly offset)
+    // name
     ctx.fillStyle = 'rgba(255,255,255,0.95)';
     ctx.font = '12px system-ui, Arial';
     ctx.textAlign = 'center';
-    ctx.fillText(p.username, screen.x, screen.y + 36);
+    ctx.fillText(p.username, screen.x, screen.y + PLAYER_RADIUS + 14);
   }
 }
 
-// Minimap (unchanged appearance)
+// Minimap (adjust dot sizes slightly)
 function drawMinimap(camX, camY) {
   const maxSize = Math.min(260, Math.floor(viewport.w * 0.28));
   const size = Math.max(120, maxSize);
@@ -632,16 +653,16 @@ function drawMinimap(camX, camY) {
     if (p.id === myId) {
       ctx.beginPath();
       ctx.fillStyle = '#ffe04a';
-      ctx.arc(px, py, 4.5, 0, Math.PI * 2);
+      ctx.arc(px, py, 5.5, 0, Math.PI * 2);
       ctx.fill();
       ctx.beginPath();
       ctx.fillStyle = 'rgba(255,224,74,0.14)';
-      ctx.arc(px, py, 7.5, 0, Math.PI * 2);
+      ctx.arc(px, py, 9.5, 0, Math.PI * 2);
       ctx.fill();
     } else {
       ctx.beginPath();
       ctx.fillStyle = '#bdbdbd';
-      ctx.arc(px, py, 3, 0, Math.PI * 2);
+      ctx.arc(px, py, 3.5, 0, Math.PI * 2);
       ctx.fill();
     }
   }
@@ -675,31 +696,26 @@ function roundRect(ctx, x, y, w, h, r) {
 function render() {
   const now = performance.now();
   let dt = (now - lastFrameTime) / 1000;
-  if (dt > 0.2) dt = 0.2; // clamp large dt
+  if (dt > 0.2) dt = 0.2;
   lastFrameTime = now;
 
-  // camera centers on local player
   const me = players.get(myId);
   const cx = (me ? me.dispX : localState.x) - viewport.w / 2;
   const cy = (me ? me.dispY : localState.y) - viewport.h / 2;
-  // clamp camera to world bounds so you can't see outside the map
   const camX = Math.max(0, Math.min(MAP.width - viewport.w, cx));
   const camY = Math.max(0, Math.min(MAP.height - viewport.h, cy));
 
-  // Draw background (grass)
   drawBackground(camX, camY, viewport.w, viewport.h);
 
-  // Draw players (this updates display positions smoothly)
   drawPlayers(camX, camY, Date.now(), dt);
 
-  // Draw minimap
   drawMinimap(camX, camY);
 
   requestAnimationFrame(render);
 }
 requestAnimationFrame(render);
 
-// on load focus username and update viewport
+// on load
 window.addEventListener('load', () => {
   usernameInput.focus();
   resizeCanvas();
