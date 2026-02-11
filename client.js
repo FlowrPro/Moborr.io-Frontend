@@ -10,10 +10,8 @@ const joinBtn = document.getElementById('joinBtn');
 const usernameInput = document.getElementById('username');
 const connectStatusEl = document.getElementById('connectStatus');
 
-const loadingScreen = document.getElementById('loading-screen');
-const loadingMain = document.getElementById('loading-main');
-const loadingSub = document.getElementById('loading-sub');
-const loadingUsername = document.getElementById('loading-username');
+// The loading overlay is created dynamically only after Play is clicked.
+let loadingScreen = null;
 
 let socket = null;
 let myId = null;
@@ -47,22 +45,79 @@ function createInterp() {
   return { targetX: 0, targetY: 0, startX: 0, startY: 0, startTime: 0, endTime: 0 };
 }
 
-// Loading UI helpers
+// Dynamically create the loading overlay when needed
+function createLoadingOverlay() {
+  if (loadingScreen) return;
+
+  const overlay = document.createElement('div');
+  overlay.className = 'loading-screen';
+  overlay.setAttribute('role', 'status');
+  overlay.setAttribute('aria-live', 'polite');
+  overlay.setAttribute('aria-label', 'Loading');
+
+  const inner = document.createElement('div');
+  inner.className = 'loading-inner';
+
+  const avatar = document.createElement('div');
+  avatar.className = 'avatar';
+  const eyeL = document.createElement('div');
+  eyeL.className = 'eye left';
+  const eyeR = document.createElement('div');
+  eyeR.className = 'eye right';
+  avatar.appendChild(eyeL);
+  avatar.appendChild(eyeR);
+
+  const main = document.createElement('div');
+  main.className = 'loading-title';
+  main.id = 'loading-main';
+  main.textContent = 'Connecting...';
+
+  const sub = document.createElement('div');
+  sub.className = 'loading-sub';
+  sub.id = 'loading-sub';
+  sub.textContent = 'Preparing the world';
+
+  const uname = document.createElement('div');
+  uname.className = 'loading-username';
+  uname.id = 'loading-username';
+  uname.textContent = '';
+
+  inner.appendChild(avatar);
+  inner.appendChild(main);
+  inner.appendChild(sub);
+  inner.appendChild(uname);
+  overlay.appendChild(inner);
+
+  loadingScreen = overlay;
+}
+
+// Loading UI helpers (operate on dynamic overlay)
 function showLoading(username) {
-  // set texts
-  loadingMain.textContent = 'Connecting...';
-  loadingSub.textContent = 'Preparing the world';
-  loadingUsername.textContent = username || '';
-  loadingScreen.classList.remove('hidden');
+  createLoadingOverlay();
+  const main = loadingScreen.querySelector('#loading-main');
+  const sub = loadingScreen.querySelector('#loading-sub');
+  const uname = loadingScreen.querySelector('#loading-username');
+  if (main) main.textContent = 'Connecting...';
+  if (sub) sub.textContent = 'Preparing the world';
+  if (uname) uname.textContent = username || '';
+
+  // attach to body if not already
+  if (!document.body.contains(loadingScreen)) document.body.appendChild(loadingScreen);
 }
 function setLoadingError(text) {
-  loadingMain.textContent = 'Connection error';
-  loadingSub.textContent = text || '';
-  loadingUsername.textContent = '';
-  loadingScreen.classList.remove('hidden');
+  createLoadingOverlay();
+  const main = loadingScreen.querySelector('#loading-main');
+  const sub = loadingScreen.querySelector('#loading-sub');
+  const uname = loadingScreen.querySelector('#loading-username');
+  if (main) main.textContent = 'Connection error';
+  if (sub) sub.textContent = text || '';
+  if (uname) uname.textContent = '';
+  if (!document.body.contains(loadingScreen)) document.body.appendChild(loadingScreen);
 }
 function hideLoading() {
-  loadingScreen.classList.add('hidden');
+  if (loadingScreen && document.body.contains(loadingScreen)) {
+    document.body.removeChild(loadingScreen);
+  }
 }
 
 // Helper: are we typing in a text field? If so, don't treat movement keys as gameplay input.
@@ -70,6 +125,7 @@ function isTyping() {
   const ae = document.activeElement;
   if (!ae) return false;
   const tag = (ae.tagName || '').toLowerCase();
+  // consider inputs, textareas, and contenteditable elements as typing targets
   return tag === 'input' || tag === 'textarea' || ae.isContentEditable;
 }
 
@@ -105,8 +161,13 @@ function setupSocket(username, serverUrl) {
 
   socket.on('connect', () => {
     myId = socket.id;
-    loadingMain.textContent = 'Connected';
-    loadingSub.textContent = 'Receiving world…';
+    // update loading overlay text if present
+    if (loadingScreen) {
+      const main = loadingScreen.querySelector('#loading-main');
+      const sub = loadingScreen.querySelector('#loading-sub');
+      if (main) main.textContent = 'Connected';
+      if (sub) sub.textContent = 'Receiving world…';
+    }
     socket.emit('join', username);
   });
 
@@ -132,8 +193,13 @@ function setupSocket(username, serverUrl) {
     });
 
     // finalize and enter game
-    loadingMain.textContent = 'Ready';
-    loadingSub.textContent = '';
+    if (loadingScreen) {
+      const main = loadingScreen.querySelector('#loading-main');
+      const sub = loadingScreen.querySelector('#loading-sub');
+      if (main) main.textContent = 'Ready';
+      if (sub) sub.textContent = '';
+    }
+
     setTimeout(() => {
       hideLoading();
       startInputLoop();
@@ -177,6 +243,10 @@ function setupSocket(username, serverUrl) {
       }
     }
   });
+
+  socket.on('connect', () => {
+    // keep input loop started only after world ready (we start it after currentPlayers)
+  });
 }
 
 // apply input to a state (prediction)
@@ -217,11 +287,17 @@ joinBtn.addEventListener('click', () => {
   setupSocket(name, DEFAULT_BACKEND);
 });
 
-usernameInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') joinBtn.click(); });
+// ensure Enter works and don't let the global handlers see these key events
+usernameInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') joinBtn.click();
+  // Stop propagation so window-level movement handlers won't intercept typing keys (W/A/S/D)
+  e.stopPropagation();
+});
+usernameInput.addEventListener('keypress', (e) => e.stopPropagation());
+usernameInput.addEventListener('keyup', (e) => e.stopPropagation());
 
-// keyboard
+// keyboard: ignore movement handling if the user is focused on a text field
 window.addEventListener('keydown', (e) => {
-  // If the user is typing in an input/textarea, don't intercept movement keys.
   if (isTyping()) return;
   if (['w','a','s','d','ArrowUp','ArrowLeft','ArrowDown','ArrowRight'].includes(e.key)) {
     keys[e.key] = true; e.preventDefault();
@@ -336,8 +412,7 @@ requestAnimationFrame(render);
 
 // on load focus username and update viewport
 window.addEventListener('load', () => {
-  // Defensive: make sure loading screen is hidden until player clicks Play
-  hideLoading();
+  // No loading overlay on load — it will be created only after Play is clicked
   usernameInput.focus();
   resizeCanvas();
 });
