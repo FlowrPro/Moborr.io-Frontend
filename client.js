@@ -1,4 +1,4 @@
-// Moborr.io client — corrected prediction/smoothing to avoid oscillation, with grass, minimap, bob & blink
+// Moborr.io client — FIXED: smooth movement with proper prediction/reconciliation, grass, minimap, bob & blink
 const DEFAULT_BACKEND = 'https://moborr-io-backend.onrender.com';
 
 const canvas = document.getElementById('gameCanvas');
@@ -338,20 +338,28 @@ function setupSocket(username, serverUrl) {
         pendingInputs.splice(0, i);
         for (const inpt of pendingInputs) applyInputToState(localState, inpt.input, inpt.dt);
 
-        // Also update player's authoritative fields so other players will see correct positions in snapshots
+        // Update player's authoritative fields
         existing.x = localState.x;
         existing.y = localState.y;
         existing.vx = localState.vx;
         existing.vy = localState.vy;
 
-        // Note: do NOT immediately overwrite dispX/dispY with server pos - we render using localState for local player
+        // Set smooth interpolation target for visual smoothing
+        const interp = existing.interp || createInterp();
+        interp.startX = interp.targetX || existing.x;
+        interp.startY = interp.targetY || existing.y;
+        interp.targetX = existing.x;
+        interp.targetY = existing.y;
+        interp.startTime = now;
+        interp.endTime = now + 40; // smooth over 40ms
+        existing.interp = interp;
       } else {
         // remote player: set interpolation targets
         const interp = existing.interp || createInterp();
         interp.startX = existing.x; interp.startY = existing.y;
         interp.targetX = sp.x; interp.targetY = sp.y;
         interp.startTime = now;
-        interp.endTime = now + (1000 / SERVER_TICK_RATE) * 1.2;
+        interp.endTime = now + (1000 / SERVER_TICK_RATE) * 1.1;
         existing.vx = sp.vx; existing.vy = sp.vy;
         existing.x = sp.x;
         existing.y = sp.y;
@@ -422,10 +430,15 @@ window.addEventListener('keyup', (e) => {
   }
 });
 
-// Smoothing helper
-function smoothApproach(current, target, dtSeconds, speed) {
-  const factor = 1 - Math.exp(-speed * dtSeconds);
-  return current + (target - current) * factor;
+// Smoothing helper - hermite interpolation for smooth motion
+function hermiteInterp(p0, p1, v0, v1, t) {
+  const t2 = t * t;
+  const t3 = t2 * t;
+  const mt = 1 - t;
+  const mt2 = mt * mt;
+  const mt3 = mt2 * mt;
+  
+  return mt3 * p0 + 3 * mt2 * t * p1 + 3 * mt * t2 * v0 + t3 * v1;
 }
 
 // Avatar drawing with bobbing and blinking
@@ -536,28 +549,32 @@ function drawPlayers(camX, camY, now, dtSeconds) {
       p._blinkTime -= dtSeconds;
     }
 
-    // smoothing / display pos
+    // smoothing / display pos using interpolation
     if (p.id === myId) {
-      // CRITICAL: show the client-side predicted state (localState) directly for local player.
-      // This prevents the "fight" between local prediction and server corrections that causes oscillation.
-      // localState is kept up-to-date via applyInputToState and reconciliation when snapshots arrive.
-      // We'll still allow a very small smoothing for visual polish if desired (currently none).
-      p.dispX = localState.x;
-      p.dispY = localState.y;
-    } else {
-      // remote players: interpolate / smooth
-      if (p.interp) {
-        const t = Math.max(0, Math.min(1, (now - p.interp.startTime) / Math.max(1, (p.interp.endTime - p.interp.startTime))));
-        const tt = t * t * (3 - 2 * t); // smoothstep
-        const targetX = p.interp.startX + (p.interp.targetX - p.interp.startX) * tt;
-        const targetY = p.interp.startY + (p.interp.targetY - p.interp.startY) * tt;
-        const predictedX = targetX + (p.vx || 0) * 0.02;
-        const predictedY = targetY + (p.vy || 0) * 0.02;
-        p.dispX = smoothApproach(p.dispX, predictedX, dtSeconds, 10);
-        p.dispY = smoothApproach(p.dispY, predictedY, dtSeconds, 10);
+      // For local player: use interpolation to smooth movements from server corrections
+      if (p.interp && now < p.interp.endTime) {
+        const t = (now - p.interp.startTime) / Math.max(1, p.interp.endTime - p.interp.startTime);
+        const tt = Math.max(0, Math.min(1, t));
+        // Smooth step interpolation for natural motion
+        const ease = tt * tt * (3 - 2 * tt);
+        p.dispX = p.interp.startX + (p.interp.targetX - p.interp.startX) * ease;
+        p.dispY = p.interp.startY + (p.interp.targetY - p.interp.startY) * ease;
       } else {
-        p.dispX = smoothApproach(p.dispX, p.x, dtSeconds, 10);
-        p.dispY = smoothApproach(p.dispY, p.y, dtSeconds, 10);
+        // Already at target
+        p.dispX = localState.x;
+        p.dispY = localState.y;
+      }
+    } else {
+      // remote players: smooth interpolation
+      if (p.interp && now < p.interp.endTime) {
+        const t = (now - p.interp.startTime) / Math.max(1, p.interp.endTime - p.interp.startTime);
+        const tt = Math.max(0, Math.min(1, t));
+        const ease = tt * tt * (3 - 2 * tt); // smoothstep
+        p.dispX = p.interp.startX + (p.interp.targetX - p.interp.startX) * ease;
+        p.dispY = p.interp.startY + (p.interp.targetY - p.interp.startY) * ease;
+      } else {
+        p.dispX = p.x;
+        p.dispY = p.y;
       }
     }
 
@@ -653,11 +670,11 @@ function worldToScreen(wx, wy, camX, camY) {
   return { x: wx - camX, y: wy - camY };
 }
 
-// Render loop
+// Render loop with fixed timestep for smoother visuals
 function render() {
   const nowPerf = performance.now();
   let dt = (nowPerf - lastFrameTime) / 1000;
-  if (dt > 0.2) dt = 0.2;
+  if (dt > 0.05) dt = 0.05; // cap at 50ms to prevent big jumps
   lastFrameTime = nowPerf;
 
   const me = players.get(myId);
