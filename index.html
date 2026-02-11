@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
-  <!-- Full title screen styled to match previous design (brown background, neon title) -->
+  <!-- Full title screen styled to match the provided design (brown background, neon title) -->
   <div id="title-screen" class="title-screen" role="dialog" aria-label="Title screen">
     <div class="title-inner">
       <h1 class="game-title">MOBORR.IO</h1>
@@ -17,17 +17,22 @@
         <input id="username" class="name-input" placeholder="Enter your name..." maxlength="20" aria-label="Username" />
 
         <button id="joinBtn" class="play-btn" aria-label="Play">PLAY</button>
+
+        <div id="connectStatus" class="connect-status" aria-live="polite" hidden>
+          <span class="check">✓</span> <span class="text">Connected to server</span>
+        </div>
       </div>
     </div>
   </div>
 
-  <!-- Loading screen: full screen, shown after clicking Play -->
-  <div id="loading-screen" class="loading-screen hidden" role="status" aria-live="polite">
+  <!-- Loading screen (separate actual screen) -->
+  <div id="loading-screen" class="loading-screen hidden" role="status" aria-live="polite" aria-label="Loading">
     <div class="loading-inner">
-      <div id="loading-text" class="loading-text">Loading...</div>
-      <div class="progress-bar" aria-hidden="true">
-        <div id="loading-progress" class="progress-fill" style="width:0%"></div>
+      <div class="loading-title">Loading</div>
+      <div class="loading-bar-wrap" aria-hidden="false">
+        <div id="loading-bar" class="loading-bar"></div>
       </div>
+      <div id="loading-text" class="loading-text">Initializing…</div>
     </div>
   </div>
 
