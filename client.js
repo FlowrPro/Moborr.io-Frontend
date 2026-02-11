@@ -1,4 +1,4 @@
-// Moborr.io client — WASD movement with prediction + reconciliation + smoothing, grass, minimap, bob & blink
+// Moborr.io client — corrected prediction/smoothing to avoid oscillation, with grass, minimap, bob & blink
 const DEFAULT_BACKEND = 'https://moborr-io-backend.onrender.com';
 
 const canvas = document.getElementById('gameCanvas');
@@ -44,12 +44,11 @@ function getInputVector() {
   if (len > 1e-6) { x /= len; y /= len; }
   return { x, y };
 }
-
 function createInterp() {
   return { targetX: 0, targetY: 0, startX: 0, startY: 0, startTime: 0, endTime: 0 };
 }
 
-// --- Grass pattern setup (declare before usage to avoid TDZ) ---
+// --- Grass pattern setup ---
 let grassPattern = null;
 let grassPatternSize = 128;
 
@@ -262,6 +261,7 @@ function setupSocket(username, serverUrl) {
         _blinkTime: 0
       });
       if (p.id === myId) {
+        // initialize localState to server-provided spawn
         localState.x = p.x; localState.y = p.y; localState.vx = p.vx || 0; localState.vy = p.vy || 0;
       }
     });
@@ -325,18 +325,26 @@ function setupSocket(username, serverUrl) {
       }
 
       if (sp.id === myId) {
-        // authoritative position for me
+        // authoritative server position for me: reconcile
         const serverSeq = sp.lastProcessedInput || 0;
-        existing.x = sp.x; existing.y = sp.y; existing.vx = sp.vx; existing.vy = sp.vy;
-        localState.x = sp.x; localState.y = sp.y; localState.vx = sp.vx; localState.vy = sp.vy;
 
-        // reconciliation: drop acknowledged inputs and reapply pending to local predicted state
+        // update authoritative values
+        existing.x = sp.x; existing.y = sp.y; existing.vx = sp.vx; existing.vy = sp.vy;
+
+        // set localState to server position, then reapply pending inputs (reconciliation)
+        localState.x = sp.x; localState.y = sp.y; localState.vx = sp.vx; localState.vy = sp.vy;
         let i = 0;
         while (i < pendingInputs.length && pendingInputs[i].seq <= serverSeq) i++;
         pendingInputs.splice(0, i);
         for (const inpt of pendingInputs) applyInputToState(localState, inpt.input, inpt.dt);
 
-        // keep existing.dispX/dispY — smoothing will bring visuals to authoritative quickly
+        // Also update player's authoritative fields so other players will see correct positions in snapshots
+        existing.x = localState.x;
+        existing.y = localState.y;
+        existing.vx = localState.vx;
+        existing.vy = localState.vy;
+
+        // Note: do NOT immediately overwrite dispX/dispY with server pos - we render using localState for local player
       } else {
         // remote player: set interpolation targets
         const interp = existing.interp || createInterp();
@@ -372,6 +380,7 @@ function startInputLoop() {
     inputSeq++;
     socket.emit('input', { seq: inputSeq, dt: INPUT_DT, input });
     pendingInputs.push({ seq: inputSeq, dt: INPUT_DT, input });
+    // apply prediction locally
     applyInputToState(localState, input, INPUT_DT);
     const me = players.get(myId);
     if (me) { me.x = localState.x; me.y = localState.y; me.vx = localState.vx; me.vy = localState.vy; }
@@ -419,8 +428,7 @@ function smoothApproach(current, target, dtSeconds, speed) {
   return current + (target - current) * factor;
 }
 
-// Avatar drawing (replicates provided image with gold rim, green face, black eyes & highlight, smile)
-// Supports bobOffset (vertical) and blinkClosedAmount (0..1)
+// Avatar drawing with bobbing and blinking
 function drawPlayerAvatar(screenX, screenY, radius, p, isLocal, blinkClosedAmount, bobOffset) {
   const faceColor = '#17b84a';
   const outerGold = '#d3b34a';
@@ -466,7 +474,7 @@ function drawPlayerAvatar(screenX, screenY, radius, p, isLocal, blinkClosedAmoun
 
     if (visibleH > 0.12) {
       ctx.beginPath();
-      ctx.ellipse(cx - eyeW * 0.18, cy - eyeH * 0.16 * visibleH, eyeW * 0.18, eyeH * 0.28 * visibleAmount(visibleH), 0, 0, Math.PI * 2);
+      ctx.ellipse(cx - eyeW * 0.18, cy - eyeH * 0.16 * visibleH, eyeW * 0.18, eyeH * 0.28 * visibleH, 0, 0, Math.PI * 2);
       ctx.fillStyle = '#fff';
       ctx.fill();
     }
@@ -478,9 +486,6 @@ function drawPlayerAvatar(screenX, screenY, radius, p, isLocal, blinkClosedAmoun
     ctx.lineWidth = 1;
     ctx.stroke();
   }
-
-  // helper to guard tiny highlight scaling
-  function visibleAmount(v) { return Math.max(0.12, v); }
 
   drawEye(screenX - eyeOffsetX, screenY + eyeOffsetY + bobOffset, blinkClosedAmount);
   drawEye(screenX + eyeOffsetX, screenY + eyeOffsetY + bobOffset, blinkClosedAmount);
@@ -531,25 +536,19 @@ function drawPlayers(camX, camY, now, dtSeconds) {
       p._blinkTime -= dtSeconds;
     }
 
-    // smoothing
+    // smoothing / display pos
     if (p.id === myId) {
-      const predictedX = p.x + (p.vx || 0) * 0.02;
-      const predictedY = p.y + (p.vy || 0) * 0.02;
-      const dx = predictedX - p.dispX;
-      const dy = predictedY - p.dispY;
-      const distSq = dx * dx + dy * dy;
-      const snapThresholdSq = (PLAYER_RADIUS * 8) * (PLAYER_RADIUS * 8);
-      if (distSq > snapThresholdSq) {
-        p.dispX = predictedX;
-        p.dispY = predictedY;
-      } else {
-        p.dispX = smoothApproach(p.dispX, predictedX, dtSeconds, 60);
-        p.dispY = smoothApproach(p.dispY, predictedY, dtSeconds, 60);
-      }
+      // CRITICAL: show the client-side predicted state (localState) directly for local player.
+      // This prevents the "fight" between local prediction and server corrections that causes oscillation.
+      // localState is kept up-to-date via applyInputToState and reconciliation when snapshots arrive.
+      // We'll still allow a very small smoothing for visual polish if desired (currently none).
+      p.dispX = localState.x;
+      p.dispY = localState.y;
     } else {
+      // remote players: interpolate / smooth
       if (p.interp) {
         const t = Math.max(0, Math.min(1, (now - p.interp.startTime) / Math.max(1, (p.interp.endTime - p.interp.startTime))));
-        const tt = t * t * (3 - 2 * t);
+        const tt = t * t * (3 - 2 * t); // smoothstep
         const targetX = p.interp.startX + (p.interp.targetX - p.interp.startX) * tt;
         const targetY = p.interp.startY + (p.interp.targetY - p.interp.startY) * tt;
         const predictedX = targetX + (p.vx || 0) * 0.02;
@@ -575,7 +574,7 @@ function drawPlayers(camX, camY, now, dtSeconds) {
   }
 }
 
-// Minimap
+// Minimap & helpers
 function roundRect(ctx, x, y, w, h, r) {
   const rad = Math.min(r, w / 2, h / 2);
   ctx.beginPath();
