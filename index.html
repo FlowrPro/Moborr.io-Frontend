@@ -7,23 +7,21 @@
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
-  <!-- Full title screen -->
-  <div id="title-screen" class="title-screen">
+  <!-- Full title screen styled to match the provided design (brown background, neon title) -->
+  <div id="title-screen" class="title-screen" role="dialog" aria-label="Title screen">
     <div class="title-inner">
-      <h1 class="game-title">Moborr.io</h1>
+      <h1 class="game-title">MOBORR.IO</h1>
+      <div class="subtitle">Multiplayer IO Game</div>
 
       <div class="center-card">
-        <label class="label">Username</label>
-        <input id="username" placeholder="Enter username" maxlength="20" />
+        <input id="username" class="name-input" placeholder="Enter your name..." maxlength="20" aria-label="Username" />
 
-        <div class="controls">
-          <button id="joinBtn">Play</button>
+        <button id="joinBtn" class="play-btn" aria-label="Play">PLAY</button>
+
+        <div id="connectStatus" class="connect-status" aria-live="polite" hidden>
+          <span class="check">✓</span> <span class="text">Connected to server</span>
         </div>
-
-        <p class="hint">Use WASD or arrow keys to move.</p>
       </div>
-
-      <div class="footer-note">Host backend on Render, frontend on Netlify.</div>
     </div>
   </div>
 
