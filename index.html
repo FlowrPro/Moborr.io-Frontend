@@ -16,23 +16,18 @@
         <label class="label">Username</label>
         <input id="username" placeholder="Enter username" maxlength="20" />
 
-        <label class="label">Server URL</label>
-        <input id="serverUrl" placeholder="e.g. https://moborr-io-backend.onrender.com" />
-
         <div class="controls">
           <button id="joinBtn">Play</button>
         </div>
 
-        <p class="hint">Use WASD or arrow keys to move. Enter your backend URL if not using same origin.</p>
-
-        <div id="connectStatus" class="status" aria-live="polite" hidden></div>
+        <p class="hint">Use WASD or arrow keys to move.</p>
       </div>
 
-      <div class="footer-note">Host backend on Render, frontend on Netlify — the backend URL is prefilled for your Render service.</div>
+      <div class="footer-note">Host backend on Render, frontend on Netlify.</div>
     </div>
   </div>
 
-  <canvas id="gameCanvas" width="800" height="600"></canvas>
+  <canvas id="gameCanvas"></canvas>
 
   <script src="https://cdn.socket.io/4.7.1/socket.io.min.js"></script>
   <script src="/client.js"></script>
