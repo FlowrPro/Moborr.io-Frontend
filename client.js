@@ -1,5 +1,5 @@
 // Moborr.io client — WASD movement with prediction + reconciliation + interpolation
-// Default backend URL (keeps previous behavior). No server URL input in UI.
+// Default backend URL (unchanged)
 const DEFAULT_BACKEND = 'https://moborr-io-backend.onrender.com';
 
 const canvas = document.getElementById('gameCanvas');
@@ -8,6 +8,7 @@ const ctx = canvas.getContext('2d');
 const titleScreen = document.getElementById('title-screen');
 const joinBtn = document.getElementById('joinBtn');
 const usernameInput = document.getElementById('username');
+const connectStatusEl = document.getElementById('connectStatus');
 
 let socket = null;
 let myId = null;
@@ -41,6 +42,15 @@ function createInterp() {
   return { targetX: 0, targetY: 0, startX: 0, startY: 0, startTime: 0, endTime: 0 };
 }
 
+// status helper (updates the status element on the title screen)
+function setStatus(text, visible = true) {
+  if (!connectStatusEl) return;
+  connectStatusEl.hidden = !visible;
+  if (!visible) return;
+  // small check icon + text
+  connectStatusEl.innerHTML = `<span class="check">✓</span> <span class="text">${text}</span>`;
+}
+
 // Camera / viewport
 let dpr = Math.max(1, window.devicePixelRatio || 1);
 let viewport = { w: 0, h: 0 }; // in CSS pixels
@@ -67,12 +77,26 @@ function setupSocket(username, serverUrl) {
     socket = io(serverUrl, { transports: ['websocket', 'polling'] });
   } catch (err) {
     console.error('Socket init failed', err);
+    setStatus('Connection failed', true);
     return;
   }
 
+  setStatus('Connecting…', true);
+
   socket.on('connect', () => {
     myId = socket.id;
+    setStatus('Connected to server', true);
     socket.emit('join', username);
+  });
+
+  socket.on('connect_error', (err) => {
+    console.warn('connect_error', err);
+    setStatus('Connection failed — check server/CORS', true);
+  });
+
+  socket.on('disconnect', (reason) => {
+    console.warn('disconnected', reason);
+    setStatus('Disconnected from server', true);
   });
 
   socket.on('currentPlayers', (list) => {
@@ -85,8 +109,8 @@ function setupSocket(username, serverUrl) {
         localState.x = p.x; localState.y = p.y; localState.vx = p.vx || 0; localState.vy = p.vy || 0;
       }
     });
-    // hide title screen
-    setTimeout(() => titleScreen.classList.add('hidden'), 150);
+    // keep status visible as connected, then hide title screen
+    setTimeout(() => titleScreen.classList.add('hidden'), 350);
   });
 
   socket.on('newPlayer', (p) => {
@@ -109,13 +133,10 @@ function setupSocket(username, serverUrl) {
       if (sp.id === myId) {
         const serverSeq = sp.lastProcessedInput || 0;
         existing.x = sp.x; existing.y = sp.y; existing.vx = sp.vx; existing.vy = sp.vy;
-        // reconcile local
         localState.x = sp.x; localState.y = sp.y; localState.vx = sp.vx; localState.vy = sp.vy;
-        // drop processed inputs
         let i = 0;
         while (i < pendingInputs.length && pendingInputs[i].seq <= serverSeq) i++;
         pendingInputs.splice(0, i);
-        // reapply remaining
         for (const inpt of pendingInputs) applyInputToState(localState, inpt.input, inpt.dt);
         const me = players.get(myId);
         if (me) { me.x = localState.x; me.y = localState.y; me.vx = localState.vx; me.vy = localState.vy; }
@@ -165,8 +186,11 @@ function stopInputLoop() {
 joinBtn.addEventListener('click', () => {
   const name = (usernameInput.value || 'Player').trim();
   if (!name) return;
+  setStatus('Connecting…', true);
   setupSocket(name, DEFAULT_BACKEND);
 });
+
+usernameInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') joinBtn.click(); });
 
 // keyboard
 window.addEventListener('keydown', (e) => {
@@ -280,9 +304,10 @@ function render() {
 }
 requestAnimationFrame(render);
 
-// on load focus username
+// on load focus username and update viewport
 window.addEventListener('load', () => {
   usernameInput.focus();
+  resizeCanvas();
 });
 
 // cleanup
