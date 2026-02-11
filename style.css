@@ -1,5 +1,5 @@
-/* Title screen: neon style matching the provided screenshot, brown background.
-   Canvas fills the screen behind the title screen. */
+/* Title & Loading screens: neon style matching the provided screenshot, brown background.
+   Canvas fills the screen behind the UI. */
 
 :root{
   --bg-top: #5a3f2d;
@@ -9,6 +9,8 @@
   --accent-button: linear-gradient(180deg, #1fb3a9, #0f6670);
   --muted: #cdbdae;
   --input-bg: rgba(0,0,0,0.25);
+  --progress-bg: rgba(255,255,255,0.04);
+  --progress-fill: rgba(21,230,196,0.95);
 }
 
 *{box-sizing:border-box}
@@ -120,26 +122,57 @@ canvas{
   box-shadow: 0 12px 40px rgba(8,20,20,0.6), 0 0 20px rgba(21,230,196,0.12);
 }
 
-/* small connected status shown under the button */
-.connect-status{
-  margin-top:6px;
+/* hide title screen when game is active */
+.hidden{display:none}
+
+/* Loading screen (full screen) */
+.loading-screen{
+  position:fixed;
+  inset:0;
   display:flex;
   align-items:center;
   justify-content:center;
-  gap:8px;
-  color: #b9f9d6;
-  font-size:13px;
-  opacity:0.95;
+  z-index:4;
+  padding:36px;
+  background: linear-gradient(180deg, rgba(107,79,58,0.94), rgba(53,35,24,0.92));
 }
 
-.connect-status .check{
-  color: #aaffc9;
-  font-weight:700;
-  text-shadow: 0 1px 6px rgba(21,230,196,0.6);
+.loading-inner{
+  width:460px;
+  max-width:92%;
+  background: rgba(20,14,12,0.3);
+  border-radius:12px;
+  padding:28px;
+  box-shadow: 0 18px 60px rgba(0,0,0,0.6);
+  display:flex;
+  flex-direction:column;
+  gap:16px;
+  align-items:center;
 }
 
-/* hide title screen when game is active */
-.hidden{display:none}
+.loading-text{
+  font-size:20px;
+  color:var(--muted);
+  letter-spacing:0.8px;
+  font-weight:600;
+}
+
+.progress-bar{
+  width:100%;
+  height:14px;
+  background: var(--progress-bg);
+  border-radius:10px;
+  overflow:hidden;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.02);
+}
+
+.progress-fill{
+  height:100%;
+  width:0%;
+  background: linear-gradient(90deg, rgba(21,230,196,0.95), rgba(21,200,180,0.9));
+  transition: width 220ms ease;
+  box-shadow: 0 6px 30px rgba(21,230,196,0.08);
+}
 
 /* responsive tweaks */
 @media (max-width:520px){
@@ -147,4 +180,5 @@ canvas{
   .game-title{font-size:44px}
   .name-input{height:48px}
   .play-btn{height:48px;font-size:16px}
+  .loading-inner{padding:18px}
 }
