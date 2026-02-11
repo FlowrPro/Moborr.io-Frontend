@@ -1,5 +1,4 @@
-// Moborr.io client — WASD movement with prediction + reconciliation + smoothing, avatar bob & blink
-// Default backend URL (unchanged)
+// Moborr.io client — WASD movement with prediction + reconciliation + smoothing, grass, minimap, bob & blink
 const DEFAULT_BACKEND = 'https://moborr-io-backend.onrender.com';
 
 const canvas = document.getElementById('gameCanvas');
@@ -11,34 +10,29 @@ const usernameInput = document.getElementById('username');
 const connectStatusEl = document.getElementById('connectStatus');
 
 let loadingScreen = null;
-
 let socket = null;
 let myId = null;
 
-const players = new Map(); // id -> { id, username, x, y, vx, vy, color, interp, dispX, dispY, _bobPhase, _nextBlink, _blinkTime }
+// Game state
+const players = new Map(); // id -> player object
 const pendingInputs = [];
 
-// INPUT / NETWORK RATES
-// Send inputs frequently for responsive control.
-const SEND_RATE = 60; // inputs per second
+// Networking / rates
+const SEND_RATE = 30; // inputs per second (client -> server)
 const INPUT_DT = 1 / SEND_RATE;
+const SERVER_TICK_RATE = 30; // server snapshot rate (should match server)
+const SPEED = 260; // px/sec (must match server)
 
-// Server tick rate (should match server.js) used for interpolation heuristics
-const SERVER_TICK_RATE = 30;
+// Avatar / visuals
+const PLAYER_RADIUS = 26; // size similar to florr.io
 
-// Movement speed (must match server)
-const SPEED = 260; // px/sec (matched to server)
-
-// Avatar size (bigger, not smooshed)
-const PLAYER_RADIUS = 26; // larger; similar to florr.io character size
-
-// BIG map: 12000 x 12000 (must match server)
+// Map
 const MAP = { width: 12000, height: 12000, padding: 16 };
 
 let localState = { x: MAP.width / 2, y: MAP.height / 2, vx: 0, vy: 0 };
 let inputSeq = 0;
 
-// keypad state
+// Input state
 const keys = {};
 function getInputVector() {
   let x = 0, y = 0;
@@ -55,115 +49,10 @@ function createInterp() {
   return { targetX: 0, targetY: 0, startX: 0, startY: 0, startTime: 0, endTime: 0 };
 }
 
-// --- Grass pattern variables (reuse) ---
+// --- Grass pattern setup (declare before usage to avoid TDZ) ---
 let grassPattern = null;
 let grassPatternSize = 128;
 
-// Dynamically create the loading overlay when needed
-function createLoadingOverlay() {
-  if (loadingScreen) return;
-
-  const overlay = document.createElement('div');
-  overlay.className = 'loading-screen';
-  overlay.setAttribute('role', 'status');
-  overlay.setAttribute('aria-live', 'polite');
-  overlay.setAttribute('aria-label', 'Loading');
-
-  const inner = document.createElement('div');
-  inner.className = 'loading-inner';
-
-  const avatar = document.createElement('div');
-  avatar.className = 'avatar';
-  const eyeL = document.createElement('div');
-  eyeL.className = 'eye left';
-  const eyeR = document.createElement('div');
-  eyeR.className = 'eye right';
-  avatar.appendChild(eyeL);
-  avatar.appendChild(eyeR);
-
-  const main = document.createElement('div');
-  main.className = 'loading-title';
-  main.id = 'loading-main';
-  main.textContent = 'Connecting...';
-
-  const sub = document.createElement('div');
-  sub.className = 'loading-sub';
-  sub.id = 'loading-sub';
-  sub.textContent = 'Preparing the world';
-
-  const uname = document.createElement('div');
-  uname.className = 'loading-username';
-  uname.id = 'loading-username';
-  uname.textContent = '';
-
-  inner.appendChild(avatar);
-  inner.appendChild(main);
-  inner.appendChild(sub);
-  inner.appendChild(uname);
-  overlay.appendChild(inner);
-
-  loadingScreen = overlay;
-}
-
-// Loading UI helpers (operate on dynamic overlay)
-function showLoading(username) {
-  createLoadingOverlay();
-  const main = loadingScreen.querySelector('#loading-main');
-  const sub = loadingScreen.querySelector('#loading-sub');
-  const uname = loadingScreen.querySelector('#loading-username');
-  if (main) main.textContent = 'Connecting...';
-  if (sub) sub.textContent = 'Preparing the world';
-  if (uname) uname.textContent = username || '';
-
-  if (!document.body.contains(loadingScreen)) document.body.appendChild(loadingScreen);
-}
-function setLoadingError(text) {
-  createLoadingOverlay();
-  const main = loadingScreen.querySelector('#loading-main');
-  const sub = loadingScreen.querySelector('#loading-sub');
-  const uname = loadingScreen.querySelector('#loading-username');
-  if (main) main.textContent = 'Connection error';
-  if (sub) sub.textContent = text || '';
-  if (uname) uname.textContent = '';
-  if (!document.body.contains(loadingScreen)) document.body.appendChild(loadingScreen);
-}
-function hideLoading() {
-  if (loadingScreen && document.body.contains(loadingScreen)) {
-    document.body.removeChild(loadingScreen);
-  }
-}
-
-// Helper: are we typing in a text field? If so, don't treat movement keys as gameplay input.
-function isTyping() {
-  const ae = document.activeElement;
-  if (!ae) return false;
-  const tag = (ae.tagName || '').toLowerCase();
-  return tag === 'input' || tag === 'textarea' || ae.isContentEditable;
-}
-
-// Camera / viewport
-let dpr = Math.max(1, window.devicePixelRatio || 1);
-let viewport = { w: 0, h: 0 }; // in CSS pixels
-let viewPixels = { w: 0, h: 0 }; // physical canvas px
-function resizeCanvas() {
-  dpr = Math.max(1, window.devicePixelRatio || 1);
-  viewport.w = Math.max(320, window.innerWidth);
-  viewport.h = Math.max(240, window.innerHeight);
-  canvas.style.width = viewport.w + 'px';
-  canvas.style.height = viewport.h + 'px';
-  viewPixels.w = Math.floor(viewport.w * dpr);
-  viewPixels.h = Math.floor(viewport.h * dpr);
-  canvas.width = viewPixels.w;
-  canvas.height = viewPixels.h;
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0); // work in CSS pixels
-
-  // regenerate grass pattern when DPI or size changes
-  createGrassPattern();
-}
-window.addEventListener('resize', resizeCanvas);
-resizeCanvas();
-
-// --- Grass background pattern ---
 function createGrassPattern() {
   grassPatternSize = Math.max(64, Math.round(Math.min(160, 128 * (dpr || 1))));
   const c = document.createElement('canvas');
@@ -172,7 +61,7 @@ function createGrassPattern() {
   const g = c.getContext('2d');
 
   // base green
-  g.fillStyle = '#4aa04a'; // mid green
+  g.fillStyle = '#4aa04a';
   g.fillRect(0, 0, c.width, c.height);
 
   // subtle darker stripes
@@ -182,7 +71,7 @@ function createGrassPattern() {
     g.fillRect(0, y, c.width, 1 + Math.random() * 2);
   }
 
-  // draw blades
+  // blades of grass
   for (let i = 0; i < c.width * c.height / 120; i++) {
     const x = Math.random() * c.width;
     const y = Math.random() * c.height;
@@ -197,7 +86,7 @@ function createGrassPattern() {
     g.stroke();
   }
 
-  // occasional flowers/dots for variety
+  // small flowers/dots
   for (let i = 0; i < 8; i++) {
     g.fillStyle = ['#ffd24a', '#ffe08b', '#ffd1e6'][Math.floor(Math.random() * 3)];
     g.beginPath();
@@ -210,27 +99,107 @@ function createGrassPattern() {
   grassPattern = ctx.createPattern(c, 'repeat');
 }
 
-// Background draw (replaces grid)
+// Loading overlay (created dynamically to avoid covering title on load)
+function createLoadingOverlay() {
+  if (loadingScreen) return;
+  const overlay = document.createElement('div');
+  overlay.className = 'loading-screen';
+  overlay.setAttribute('role', 'status');
+  overlay.setAttribute('aria-live', 'polite');
+  overlay.setAttribute('aria-label', 'Loading');
+
+  const inner = document.createElement('div');
+  inner.className = 'loading-inner';
+
+  const avatar = document.createElement('div');
+  avatar.className = 'avatar';
+  const eyeL = document.createElement('div'); eyeL.className = 'eye left';
+  const eyeR = document.createElement('div'); eyeR.className = 'eye right';
+  avatar.appendChild(eyeL); avatar.appendChild(eyeR);
+
+  const main = document.createElement('div'); main.className = 'loading-title'; main.id = 'loading-main'; main.textContent = 'Connecting...';
+  const sub = document.createElement('div'); sub.className = 'loading-sub'; sub.id = 'loading-sub'; sub.textContent = 'Preparing the world';
+  const uname = document.createElement('div'); uname.className = 'loading-username'; uname.id = 'loading-username'; uname.textContent = '';
+
+  inner.appendChild(avatar);
+  inner.appendChild(main);
+  inner.appendChild(sub);
+  inner.appendChild(uname);
+  overlay.appendChild(inner);
+
+  loadingScreen = overlay;
+}
+function showLoading(username) {
+  createLoadingOverlay();
+  const main = loadingScreen.querySelector('#loading-main');
+  const sub = loadingScreen.querySelector('#loading-sub');
+  const uname = loadingScreen.querySelector('#loading-username');
+  if (main) main.textContent = 'Connecting...';
+  if (sub) sub.textContent = 'Preparing the world';
+  if (uname) uname.textContent = username || '';
+  if (!document.body.contains(loadingScreen)) document.body.appendChild(loadingScreen);
+}
+function setLoadingError(text) {
+  createLoadingOverlay();
+  const main = loadingScreen.querySelector('#loading-main');
+  const sub = loadingScreen.querySelector('#loading-sub');
+  const uname = loadingScreen.querySelector('#loading-username');
+  if (main) main.textContent = 'Connection error';
+  if (sub) sub.textContent = text || '';
+  if (uname) uname.textContent = '';
+  if (!document.body.contains(loadingScreen)) document.body.appendChild(loadingScreen);
+}
+function hideLoading() {
+  if (loadingScreen && document.body.contains(loadingScreen)) document.body.removeChild(loadingScreen);
+}
+
+// Typing guard
+function isTyping() {
+  const ae = document.activeElement;
+  if (!ae) return false;
+  const tag = (ae.tagName || '').toLowerCase();
+  return tag === 'input' || tag === 'textarea' || ae.isContentEditable;
+}
+
+// Canvas / DPR / resize
+let dpr = Math.max(1, window.devicePixelRatio || 1);
+let viewport = { w: 0, h: 0 };
+let viewPixels = { w: 0, h: 0 };
+
+function resizeCanvas() {
+  dpr = Math.max(1, window.devicePixelRatio || 1);
+  viewport.w = Math.max(320, window.innerWidth);
+  viewport.h = Math.max(240, window.innerHeight);
+  canvas.style.width = viewport.w + 'px';
+  canvas.style.height = viewport.h + 'px';
+  viewPixels.w = Math.floor(viewport.w * dpr);
+  viewPixels.h = Math.floor(viewport.h * dpr);
+  canvas.width = viewPixels.w;
+  canvas.height = viewPixels.h;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  createGrassPattern();
+}
+window.addEventListener('resize', resizeCanvas);
+resizeCanvas();
+
+// Grass background draw
 function drawBackground(camX, camY, vw, vh) {
   if (!grassPattern) {
     ctx.fillStyle = '#4aa04a';
     ctx.fillRect(0, 0, vw, vh);
     return;
   }
-
   try {
     if (typeof grassPattern.setTransform === 'function') {
       const t = new DOMMatrix();
       const ox = - (camX % grassPatternSize);
       const oy = - (camY % grassPatternSize);
-      t.e = ox;
-      t.f = oy;
+      t.e = ox; t.f = oy;
       grassPattern.setTransform(t);
     }
   } catch (err) {
-    // ignore if not supported
+    // ignore
   }
-
   ctx.fillStyle = grassPattern;
   ctx.fillRect(0, 0, vw, vh);
 
@@ -242,7 +211,7 @@ function drawBackground(camX, camY, vw, vh) {
   ctx.fillRect(0, 0, vw, vh);
 }
 
-// networking
+// Networking / socket
 function setupSocket(username, serverUrl) {
   if (!serverUrl) serverUrl = DEFAULT_BACKEND;
   try {
@@ -356,17 +325,18 @@ function setupSocket(username, serverUrl) {
       }
 
       if (sp.id === myId) {
-        // authoritative server position for me: reconcile
+        // authoritative position for me
         const serverSeq = sp.lastProcessedInput || 0;
         existing.x = sp.x; existing.y = sp.y; existing.vx = sp.vx; existing.vy = sp.vy;
         localState.x = sp.x; localState.y = sp.y; localState.vx = sp.vx; localState.vy = sp.vy;
 
+        // reconciliation: drop acknowledged inputs and reapply pending to local predicted state
         let i = 0;
         while (i < pendingInputs.length && pendingInputs[i].seq <= serverSeq) i++;
         pendingInputs.splice(0, i);
         for (const inpt of pendingInputs) applyInputToState(localState, inpt.input, inpt.dt);
 
-        // keep display position (dispX, dispY) and allow smoothing to catch up
+        // keep existing.dispX/dispY — smoothing will bring visuals to authoritative quickly
       } else {
         // remote player: set interpolation targets
         const interp = existing.interp || createInterp();
@@ -381,13 +351,9 @@ function setupSocket(username, serverUrl) {
       }
     }
   });
-
-  socket.on('connect', () => {
-    // nothing here — input loop starts after currentPlayers
-  });
 }
 
-// apply input to a state (prediction)
+// Apply input to a predicted state (client-side prediction)
 function applyInputToState(state, input, dt) {
   state.vx = input.x * SPEED;
   state.vy = input.y * SPEED;
@@ -397,6 +363,7 @@ function applyInputToState(state, input, dt) {
   state.y = Math.max(MAP.padding, Math.min(MAP.height - MAP.padding, state.y));
 }
 
+// Input loop (ensure single interval)
 let sendInterval = null;
 function startInputLoop() {
   if (!socket || sendInterval) return;
@@ -424,7 +391,7 @@ joinBtn.addEventListener('click', () => {
   setupSocket(name, DEFAULT_BACKEND);
 });
 
-// ensure Enter works and protect typing
+// protect typing so movement keys aren't swallowed
 usernameInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') joinBtn.click();
   e.stopPropagation();
@@ -432,7 +399,7 @@ usernameInput.addEventListener('keydown', (e) => {
 usernameInput.addEventListener('keypress', (e) => e.stopPropagation());
 usernameInput.addEventListener('keyup', (e) => e.stopPropagation());
 
-// keyboard: ignore movement handling if typing
+// keyboard handlers (ignore if typing)
 window.addEventListener('keydown', (e) => {
   if (isTyping()) return;
   if (['w','a','s','d','ArrowUp','ArrowLeft','ArrowDown','ArrowRight'].includes(e.key)) {
@@ -446,23 +413,16 @@ window.addEventListener('keyup', (e) => {
   }
 });
 
-// Rendering helpers
-let lastFrameTime = performance.now();
-
-// small helper for smoothing: exponential lerp toward target based on speed (units per second)
+// Smoothing helper
 function smoothApproach(current, target, dtSeconds, speed) {
   const factor = 1 - Math.exp(-speed * dtSeconds);
   return current + (target - current) * factor;
 }
 
-function worldToScreen(wx, wy, camX, camY) {
-  return { x: wx - camX, y: wy - camY };
-}
-
-// draw an avatar similar to your image, with bobbing and blinking
+// Avatar drawing (replicates provided image with gold rim, green face, black eyes & highlight, smile)
+// Supports bobOffset (vertical) and blinkClosedAmount (0..1)
 function drawPlayerAvatar(screenX, screenY, radius, p, isLocal, blinkClosedAmount, bobOffset) {
-  // colors tuned to match the image
-  const faceColor = '#17b84a'; // vivid green
+  const faceColor = '#17b84a';
   const outerGold = '#d3b34a';
   const innerGold = '#e6cf78';
 
@@ -472,7 +432,7 @@ function drawPlayerAvatar(screenX, screenY, radius, p, isLocal, blinkClosedAmoun
   ctx.arc(screenX, screenY + bobOffset, radius + 8, 0, Math.PI * 2);
   ctx.fill();
 
-  // inner rim (thin)
+  // inner rim
   ctx.beginPath();
   ctx.fillStyle = innerGold;
   ctx.arc(screenX, screenY + bobOffset, radius + 4.5, 0, Math.PI * 2);
@@ -484,37 +444,34 @@ function drawPlayerAvatar(screenX, screenY, radius, p, isLocal, blinkClosedAmoun
   ctx.arc(screenX, screenY + bobOffset, radius, 0, Math.PI * 2);
   ctx.fill();
 
-  // thin black outline
+  // outline
   ctx.beginPath();
   ctx.lineWidth = 2;
   ctx.strokeStyle = '#000';
   ctx.arc(screenX, screenY + bobOffset, radius, 0, Math.PI * 2);
   ctx.stroke();
 
-  // eyes (vertical ovals)
+  // eyes
   const eyeOffsetX = Math.max(8, radius * 0.48);
   const eyeOffsetY = -Math.max(6, radius * 0.18);
   const eyeW = Math.max(8, radius * 0.48);
   const eyeH = Math.max(12, radius * 0.8);
 
   function drawEye(cx, cy, closedAmount) {
-    // if closedAmount near 1 => eye fully closed
-    const visibleH = Math.max(0.6, 1 - closedAmount); // preserve tiny slit
-    // black oval (scaled vertically by visibleH)
+    const visibleH = Math.max(0.06, 1 - closedAmount); // small slit allowed
     ctx.beginPath();
     ctx.ellipse(cx, cy, eyeW * 0.5, eyeH * 0.5 * visibleH, 0, 0, Math.PI * 2);
     ctx.fillStyle = '#000';
     ctx.fill();
 
     if (visibleH > 0.12) {
-      // small white inner highlight (vertical oval)
       ctx.beginPath();
-      ctx.ellipse(cx - eyeW * 0.18, cy - eyeH * 0.16 * visibleH, eyeW * 0.18, eyeH * 0.28 * visibleH, 0, 0, Math.PI * 2);
+      ctx.ellipse(cx - eyeW * 0.18, cy - eyeH * 0.16 * visibleH, eyeW * 0.18, eyeH * 0.28 * visibleAmount(visibleH), 0, 0, Math.PI * 2);
       ctx.fillStyle = '#fff';
       ctx.fill();
     }
 
-    // gentle inner gold rim stroke for warmth
+    // subtle inner stroke
     ctx.beginPath();
     ctx.ellipse(cx, cy, eyeW * 0.36, eyeH * 0.36 * visibleH, 0, 0, Math.PI * 2);
     ctx.strokeStyle = 'rgba(255,220,120,0.08)';
@@ -522,10 +479,13 @@ function drawPlayerAvatar(screenX, screenY, radius, p, isLocal, blinkClosedAmoun
     ctx.stroke();
   }
 
+  // helper to guard tiny highlight scaling
+  function visibleAmount(v) { return Math.max(0.12, v); }
+
   drawEye(screenX - eyeOffsetX, screenY + eyeOffsetY + bobOffset, blinkClosedAmount);
   drawEye(screenX + eyeOffsetX, screenY + eyeOffsetY + bobOffset, blinkClosedAmount);
 
-  // smile (curved)
+  // smile
   ctx.beginPath();
   const smileRadius = radius * 0.60;
   const smileY = screenY + radius * 0.28 + bobOffset;
@@ -535,7 +495,7 @@ function drawPlayerAvatar(screenX, screenY, radius, p, isLocal, blinkClosedAmoun
   ctx.arc(screenX, smileY, smileRadius, Math.PI * 0.18, Math.PI * 0.82);
   ctx.stroke();
 
-  // interior smile highlight
+  // interior highlight
   ctx.beginPath();
   ctx.lineWidth = 2;
   ctx.strokeStyle = '#ffd86a';
@@ -543,59 +503,57 @@ function drawPlayerAvatar(screenX, screenY, radius, p, isLocal, blinkClosedAmoun
   ctx.stroke();
 }
 
-// Draw players and update bobbing/blink state
+// Draw players (updates display smoothing, bobbing, blinking)
+let lastFrameTime = performance.now();
 function drawPlayers(camX, camY, now, dtSeconds) {
   for (const p of players.values()) {
-    // initialize properties if missing
     if (p.dispX === undefined) p.dispX = p.x;
     if (p.dispY === undefined) p.dispY = p.y;
     if (p._bobPhase === undefined) p._bobPhase = Math.random() * Math.PI * 2;
     if (p._nextBlink === undefined) p._nextBlink = 1 + Math.random() * 4;
     if (p._blinkTime === undefined) p._blinkTime = 0;
 
-    // Update bobbing: advance phase when player is moving, decay when idle
-    const speed = Math.hypot(p.vx || 0, p.vy || 0);
-    const moveFactor = Math.min(1, speed / SPEED); // 0..1
-    const bobSpeed = 2.8 + moveFactor * 6.0; // faster when moving
-    p._bobPhase += dtSeconds * bobSpeed;
-    // amplitude in pixels (subtle)
+    // bobbing
+    const speedNow = Math.hypot(p.vx || 0, p.vy || 0);
+    const moveFactor = Math.min(1, speedNow / SPEED);
+    p._bobPhase += dtSeconds * (2.8 + moveFactor * 6.0);
     const bobAmp = 1.5 + moveFactor * 4.0;
     const bobOffset = Math.sin(p._bobPhase) * bobAmp;
 
-    // Blinking: count down to next blink, then animate a short blink
-    if (p._nextBlink > 0) {
-      p._nextBlink -= dtSeconds;
-    } else if (p._blinkTime <= 0) {
-      // start blink
-      p._blinkTime = 0.20; // blink total duration (sec)
-      p._nextBlink = 1.5 + Math.random() * 4.0; // schedule next blink
-    }
-
+    // blinking
+    if (p._nextBlink > 0) p._nextBlink -= dtSeconds;
+    else if (p._blinkTime <= 0) { p._blinkTime = 0.20; p._nextBlink = 1.5 + Math.random() * 4.0; }
     let blinkClosedAmount = 0;
     if (p._blinkTime > 0) {
-      // progress 0..1 across blink duration
       const elapsed = 0.20 - p._blinkTime;
       const prog = Math.max(0, Math.min(1, elapsed / 0.20));
-      // eyelid closeness follows a sine shaped curve (quick close + open)
       blinkClosedAmount = Math.sin(prog * Math.PI);
       p._blinkTime -= dtSeconds;
     }
 
-    // update displayed position (smoothing)
+    // smoothing
     if (p.id === myId) {
-      const predictedX = p.x + (p.vx || 0) * 0.03;
-      const predictedY = p.y + (p.vy || 0) * 0.03;
-      p.dispX = smoothApproach(p.dispX, predictedX, dtSeconds, 20);
-      p.dispY = smoothApproach(p.dispY, predictedY, dtSeconds, 20);
+      const predictedX = p.x + (p.vx || 0) * 0.02;
+      const predictedY = p.y + (p.vy || 0) * 0.02;
+      const dx = predictedX - p.dispX;
+      const dy = predictedY - p.dispY;
+      const distSq = dx * dx + dy * dy;
+      const snapThresholdSq = (PLAYER_RADIUS * 8) * (PLAYER_RADIUS * 8);
+      if (distSq > snapThresholdSq) {
+        p.dispX = predictedX;
+        p.dispY = predictedY;
+      } else {
+        p.dispX = smoothApproach(p.dispX, predictedX, dtSeconds, 60);
+        p.dispY = smoothApproach(p.dispY, predictedY, dtSeconds, 60);
+      }
     } else {
       if (p.interp) {
         const t = Math.max(0, Math.min(1, (now - p.interp.startTime) / Math.max(1, (p.interp.endTime - p.interp.startTime))));
         const tt = t * t * (3 - 2 * t);
         const targetX = p.interp.startX + (p.interp.targetX - p.interp.startX) * tt;
         const targetY = p.interp.startY + (p.interp.targetY - p.interp.startY) * tt;
-        // slight prediction
-        const predictedX = targetX + (p.vx || 0) * 0.03;
-        const predictedY = targetY + (p.vy || 0) * 0.03;
+        const predictedX = targetX + (p.vx || 0) * 0.02;
+        const predictedY = targetY + (p.vy || 0) * 0.02;
         p.dispX = smoothApproach(p.dispX, predictedX, dtSeconds, 10);
         p.dispY = smoothApproach(p.dispY, predictedY, dtSeconds, 10);
       } else {
@@ -607,7 +565,6 @@ function drawPlayers(camX, camY, now, dtSeconds) {
     const screen = worldToScreen(p.dispX, p.dispY, camX, camY);
     if (screen.x < -150 || screen.x > viewport.w + 150 || screen.y < -150 || screen.y > viewport.h + 150) continue;
 
-    // draw avatar with bobbing & blink
     drawPlayerAvatar(screen.x, screen.y, PLAYER_RADIUS, p, p.id === myId, blinkClosedAmount, Math.sin(p._bobPhase) * (1.5 + moveFactor * 3.0));
 
     // name
@@ -618,7 +575,18 @@ function drawPlayers(camX, camY, now, dtSeconds) {
   }
 }
 
-// Minimap (adjust dot sizes slightly)
+// Minimap
+function roundRect(ctx, x, y, w, h, r) {
+  const rad = Math.min(r, w / 2, h / 2);
+  ctx.beginPath();
+  ctx.moveTo(x + rad, y);
+  ctx.arcTo(x + w, y, x + w, y + h, rad);
+  ctx.arcTo(x + w, y + h, x, y + h, rad);
+  ctx.arcTo(x, y + h, x, y, rad);
+  ctx.arcTo(x, y, x + w, y, rad);
+  ctx.closePath();
+}
+
 function drawMinimap(camX, camY) {
   const maxSize = Math.min(260, Math.floor(viewport.w * 0.28));
   const size = Math.max(120, maxSize);
@@ -681,23 +649,17 @@ function drawMinimap(camX, camY) {
   ctx.restore();
 }
 
-function roundRect(ctx, x, y, w, h, r) {
-  const rad = Math.min(r, w / 2, h / 2);
-  ctx.beginPath();
-  ctx.moveTo(x + rad, y);
-  ctx.arcTo(x + w, y, x + w, y + h, rad);
-  ctx.arcTo(x + w, y + h, x, y + h, rad);
-  ctx.arcTo(x, y + h, x, y, rad);
-  ctx.arcTo(x, y, x + w, y, rad);
-  ctx.closePath();
+// Coordinate helpers
+function worldToScreen(wx, wy, camX, camY) {
+  return { x: wx - camX, y: wy - camY };
 }
 
-// Main render loop
+// Render loop
 function render() {
-  const now = performance.now();
-  let dt = (now - lastFrameTime) / 1000;
+  const nowPerf = performance.now();
+  let dt = (nowPerf - lastFrameTime) / 1000;
   if (dt > 0.2) dt = 0.2;
-  lastFrameTime = now;
+  lastFrameTime = nowPerf;
 
   const me = players.get(myId);
   const cx = (me ? me.dispX : localState.x) - viewport.w / 2;
@@ -706,23 +668,21 @@ function render() {
   const camY = Math.max(0, Math.min(MAP.height - viewport.h, cy));
 
   drawBackground(camX, camY, viewport.w, viewport.h);
-
   drawPlayers(camX, camY, Date.now(), dt);
-
   drawMinimap(camX, camY);
 
   requestAnimationFrame(render);
 }
 requestAnimationFrame(render);
 
-// on load
-window.addEventListener('load', () => {
-  usernameInput.focus();
-  resizeCanvas();
-});
-
-// cleanup
+// Cleanup
 window.addEventListener('beforeunload', () => {
   stopInputLoop();
   if (socket) socket.disconnect();
+});
+
+// On load
+window.addEventListener('load', () => {
+  usernameInput.focus();
+  resizeCanvas();
 });
