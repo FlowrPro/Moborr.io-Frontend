@@ -1,5 +1,5 @@
 // Moborr.io client — WASD movement with prediction + reconciliation + interpolation
-// Default backend URL set to your Render service.
+// Default backend URL (keeps previous behavior). No server URL input in UI.
 const DEFAULT_BACKEND = 'https://moborr-io-backend.onrender.com';
 
 const canvas = document.getElementById('gameCanvas');
@@ -8,8 +8,6 @@ const ctx = canvas.getContext('2d');
 const titleScreen = document.getElementById('title-screen');
 const joinBtn = document.getElementById('joinBtn');
 const usernameInput = document.getElementById('username');
-const serverUrlInput = document.getElementById('serverUrl');
-const connectStatus = document.getElementById('connectStatus');
 
 let socket = null;
 let myId = null;
@@ -20,12 +18,13 @@ const pendingInputs = [];
 const SPEED = 180; // px/sec
 const SEND_RATE = 20; // inputs per second
 const INPUT_DT = 1 / SEND_RATE;
-const MAP = { width: canvas.width, height: canvas.height, padding: 16 };
+// BIG map: 12000 x 12000 (must match server)
+const MAP = { width: 12000, height: 12000, padding: 16 };
 
 let localState = { x: MAP.width / 2, y: MAP.height / 2, vx: 0, vy: 0 };
 let inputSeq = 0;
 
-// keyed state
+// keypad state
 const keys = {};
 function getInputVector() {
   let x = 0, y = 0;
@@ -42,47 +41,38 @@ function createInterp() {
   return { targetX: 0, targetY: 0, startX: 0, startY: 0, startTime: 0, endTime: 0 };
 }
 
-// --- Networking / Connect logic ---
-function getSavedServerUrl() {
-  return localStorage.getItem('moborr_serverUrl') || DEFAULT_BACKEND;
+// Camera / viewport
+let dpr = Math.max(1, window.devicePixelRatio || 1);
+let viewport = { w: 0, h: 0 }; // in CSS pixels
+let viewPixels = { w: 0, h: 0 }; // physical canvas px
+function resizeCanvas() {
+  dpr = Math.max(1, window.devicePixelRatio || 1);
+  viewport.w = Math.max(320, window.innerWidth);
+  viewport.h = Math.max(240, window.innerHeight);
+  canvas.style.width = viewport.w + 'px';
+  canvas.style.height = viewport.h + 'px';
+  viewPixels.w = Math.floor(viewport.w * dpr);
+  viewPixels.h = Math.floor(viewport.h * dpr);
+  canvas.width = viewPixels.w;
+  canvas.height = viewPixels.h;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0); // work in CSS pixels
 }
-function saveServerUrl(url) {
-  localStorage.setItem('moborr_serverUrl', url);
-}
+window.addEventListener('resize', resizeCanvas);
+resizeCanvas();
 
-// show a short status text on title
-function setStatus(text, visible = true) {
-  if (!connectStatus) return;
-  connectStatus.hidden = !visible;
-  connectStatus.textContent = text || '';
-}
-
-// connect using chosen server url
+// networking
 function setupSocket(username, serverUrl) {
-  setStatus('Connecting…');
   if (!serverUrl) serverUrl = DEFAULT_BACKEND;
   try {
     socket = io(serverUrl, { transports: ['websocket', 'polling'] });
   } catch (err) {
-    setStatus('Invalid server URL');
-    console.error(err);
+    console.error('Socket init failed', err);
     return;
   }
 
   socket.on('connect', () => {
     myId = socket.id;
-    setStatus('Connected — joining…');
     socket.emit('join', username);
-  });
-
-  socket.on('connect_error', (err) => {
-    console.warn('connect_error', err);
-    setStatus('Connection failed — check server URL and CORS');
-  });
-
-  socket.on('disconnect', (reason) => {
-    console.warn('disconnected', reason);
-    setStatus('Disconnected from server');
   });
 
   socket.on('currentPlayers', (list) => {
@@ -95,8 +85,8 @@ function setupSocket(username, serverUrl) {
         localState.x = p.x; localState.y = p.y; localState.vx = p.vx || 0; localState.vy = p.vy || 0;
       }
     });
-    setStatus('Joined — ready', true);
-    setTimeout(() => { titleScreen.classList.add('hidden'); setStatus('', false); }, 350);
+    // hide title screen
+    setTimeout(() => titleScreen.classList.add('hidden'), 150);
   });
 
   socket.on('newPlayer', (p) => {
@@ -119,10 +109,13 @@ function setupSocket(username, serverUrl) {
       if (sp.id === myId) {
         const serverSeq = sp.lastProcessedInput || 0;
         existing.x = sp.x; existing.y = sp.y; existing.vx = sp.vx; existing.vy = sp.vy;
+        // reconcile local
         localState.x = sp.x; localState.y = sp.y; localState.vx = sp.vx; localState.vy = sp.vy;
+        // drop processed inputs
         let i = 0;
         while (i < pendingInputs.length && pendingInputs[i].seq <= serverSeq) i++;
         pendingInputs.splice(0, i);
+        // reapply remaining
         for (const inpt of pendingInputs) applyInputToState(localState, inpt.input, inpt.dt);
         const me = players.get(myId);
         if (me) { me.x = localState.x; me.y = localState.y; me.vx = localState.vx; me.vy = localState.vy; }
@@ -140,6 +133,7 @@ function setupSocket(username, serverUrl) {
   socket.on('connect', () => startInputLoop());
 }
 
+// apply input to a state (prediction)
 function applyInputToState(state, input, dt) {
   state.vx = input.x * SPEED;
   state.vy = input.y * SPEED;
@@ -170,20 +164,11 @@ function stopInputLoop() {
 // UI wiring
 joinBtn.addEventListener('click', () => {
   const name = (usernameInput.value || 'Player').trim();
-  const serverUrl = (serverUrlInput.value || getSavedServerUrl()).trim();
-  if (!serverUrl) {
-    setStatus('Please enter a Server URL (or host backend on same origin).');
-    return;
-  }
-  saveServerUrl(serverUrl);
-  setStatus('Starting connection...');
-  setupSocket(name, serverUrl);
+  if (!name) return;
+  setupSocket(name, DEFAULT_BACKEND);
 });
 
-usernameInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') joinBtn.click(); });
-serverUrlInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') joinBtn.click(); });
-
-// keyboard input
+// keyboard
 window.addEventListener('keydown', (e) => {
   if (['w','a','s','d','ArrowUp','ArrowLeft','ArrowDown','ArrowRight'].includes(e.key)) {
     keys[e.key] = true; e.preventDefault();
@@ -195,56 +180,83 @@ window.addEventListener('keyup', (e) => {
   }
 });
 
-// rendering
-function drawGrid() {
-  ctx.fillStyle = '#07121a';
-  ctx.fillRect(0, 0, MAP.width, MAP.height);
+// Rendering: camera follows local player; draw only what's visible
+const tileSize = 40;
+function worldToScreen(wx, wy, camX, camY) {
+  return { x: wx - camX, y: wy - camY };
+}
 
-  // subtle grid
+function drawGrid(camX, camY, vw, vh) {
+  // background
+  ctx.fillStyle = '#07121a';
+  ctx.fillRect(0, 0, vw, vh);
+
+  // draw visible grid lines only
   ctx.strokeStyle = 'rgba(255,255,255,0.03)';
   ctx.lineWidth = 1;
-  const tileSize = 40;
-  for (let x = 0; x <= MAP.width; x += tileSize) {
-    ctx.beginPath(); ctx.moveTo(x + 0.5, 0); ctx.lineTo(x + 0.5, MAP.height); ctx.stroke();
+
+  const startX = Math.floor(camX / tileSize) * tileSize;
+  const endX = Math.ceil((camX + vw) / tileSize) * tileSize;
+  for (let x = startX; x <= endX; x += tileSize) {
+    const sx = Math.round(x - camX) + 0.5;
+    ctx.beginPath();
+    ctx.moveTo(sx, 0);
+    ctx.lineTo(sx, vh);
+    ctx.stroke();
   }
-  for (let y = 0; y <= MAP.height; y += tileSize) {
-    ctx.beginPath(); ctx.moveTo(0, y + 0.5); ctx.lineTo(MAP.width, y + 0.5); ctx.stroke();
+
+  const startY = Math.floor(camY / tileSize) * tileSize;
+  const endY = Math.ceil((camY + vh) / tileSize) * tileSize;
+  for (let y = startY; y <= endY; y += tileSize) {
+    const sy = Math.round(y - camY) + 0.5;
+    ctx.beginPath();
+    ctx.moveTo(0, sy);
+    ctx.lineTo(vw, sy);
+    ctx.stroke();
   }
 }
 
-function drawPlayers(now) {
+function drawPlayers(camX, camY, now) {
   for (const p of players.values()) {
-    let drawX = p.x, drawY = p.y;
+    // compute screen position
+    let px = p.x, py = p.y;
     if (p.id !== myId && p.interp) {
       const t = Math.max(0, Math.min(1, (now - p.interp.startTime) / Math.max(1, (p.interp.endTime - p.interp.startTime))));
       const tt = t * t * (3 - 2 * t);
-      drawX = p.interp.startX + (p.interp.targetX - p.interp.startX) * tt;
-      drawY = p.interp.startY + (p.interp.targetY - p.interp.startY) * tt;
+      px = p.interp.startX + (p.interp.targetX - p.interp.startX) * tt;
+      py = p.interp.startY + (p.interp.targetY - p.interp.startY) * tt;
     }
+    const screen = worldToScreen(px, py, camX, camY);
+    // quick cull
+    if (screen.x < -100 || screen.x > viewport.w + 100 || screen.y < -100 || screen.y > viewport.h + 100) continue;
 
+    // avatar
     ctx.beginPath();
     ctx.fillStyle = p.color || '#5ab';
     ctx.strokeStyle = '#0008';
     ctx.lineWidth = 3;
-    ctx.arc(drawX, drawY, 18, 0, Math.PI * 2);
+    ctx.arc(screen.x, screen.y, 18, 0, Math.PI * 2);
     ctx.fill(); ctx.stroke();
 
+    // initials
     ctx.fillStyle = '#fff';
     ctx.font = 'bold 12px system-ui, Arial';
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     const initials = (p.username || 'P').split(' ').map(s => s[0]).join('').slice(0, 2).toUpperCase();
-    ctx.fillText(initials, drawX, drawY);
+    ctx.fillText(initials, screen.x, screen.y);
 
+    // name
     ctx.fillStyle = 'rgba(255,255,255,0.95)';
     ctx.font = '12px system-ui, Arial';
     ctx.textAlign = 'center';
-    ctx.fillText(p.username, drawX, drawY + 32);
+    ctx.fillText(p.username, screen.x, screen.y + 32);
 
+    // local highlight
     if (p.id === myId) {
       ctx.beginPath();
       ctx.strokeStyle = 'rgba(255,255,255,0.06)';
       ctx.lineWidth = 6;
-      ctx.arc(drawX, drawY, 28, 0, Math.PI * 2);
+      ctx.arc(screen.x, screen.y, 28, 0, Math.PI * 2);
       ctx.stroke();
     }
   }
@@ -252,15 +264,24 @@ function drawPlayers(now) {
 
 function render() {
   const now = Date.now();
-  drawGrid();
-  drawPlayers(now);
+  // camera centers on local player
+  const me = players.get(myId);
+  // fallback to localState if server hasn't sent
+  const cx = (me ? me.x : localState.x) - viewport.w / 2;
+  const cy = (me ? me.y : localState.y) - viewport.h / 2;
+  // clamp camera to world bounds so you can't see outside the map
+  const camX = Math.max(0, Math.min(MAP.width - viewport.w, cx));
+  const camY = Math.max(0, Math.min(MAP.height - viewport.h, cy));
+
+  drawGrid(camX, camY, viewport.w, viewport.h);
+  drawPlayers(camX, camY, now);
+
   requestAnimationFrame(render);
 }
-render();
+requestAnimationFrame(render);
 
-// on load: populate server URL input from localStorage or default backend
+// on load focus username
 window.addEventListener('load', () => {
-  serverUrlInput.value = getSavedServerUrl();
   usernameInput.focus();
 });
 
