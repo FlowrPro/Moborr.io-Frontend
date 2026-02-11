@@ -1,18 +1,20 @@
-/* Title screen is a full-screen scene with brown background.
-   Canvas fills the entire viewport (the world is huge). */
+/* Title screen: neon style matching the provided screenshot, brown background.
+   Canvas fills the screen behind the title screen. */
 
 :root{
-  --bg-brown:#6b4f3a;
-  --panel:#3f2d22cc;
-  --muted:#d6c9bf;
-  --accent:#e5b77a;
-  --card:#2f1f16cc;
+  --bg-top: #5a3f2d;
+  --bg-bottom: #361f15;
+  --panel: rgba(35,24,18,0.6);
+  --accent-glow: #15e6c4; /* cyan-green glow */
+  --accent-button: linear-gradient(180deg, #1fb3a9, #0f6670);
+  --muted: #cdbdae;
+  --input-bg: rgba(0,0,0,0.25);
 }
 
 *{box-sizing:border-box}
-html,body{height:100%;margin:0;font-family:Inter,system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial;color:var(--muted);background:var(--bg-brown);display:flex;align-items:center;justify-content:center;}
+html,body{height:100%;margin:0;font-family:Inter,system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial;color:var(--muted);background:linear-gradient(180deg,var(--bg-top),var(--bg-bottom));display:flex;align-items:center;justify-content:center;}
 
-/* Canvas: full viewport */
+/* Canvas: full viewport behind UI */
 canvas{
   position: fixed;
   inset: 0;
@@ -20,7 +22,7 @@ canvas{
   height: 100vh;
   display:block;
   border: 0;
-  background: #07121a;
+  background: transparent;
   z-index: 1;
 }
 
@@ -32,39 +34,117 @@ canvas{
   align-items:center;
   justify-content:center;
   flex-direction:column;
-  background: linear-gradient(180deg, rgba(107,79,58,0.98), rgba(53,35,24,0.95));
-  z-index:3;
+  z-index: 3;
   padding:36px;
 }
 
-.title-inner{max-width:860px;width:100%;display:flex;flex-direction:column;align-items:center;gap:28px;}
-.game-title{font-size:54px;margin:6px 0 0;padding-top:12px;color:var(--accent);letter-spacing:1px;text-align:center;text-shadow:0 6px 24px rgba(0,0,0,0.45);}
-
-.center-card{
-  margin-top:6px;
-  background:var(--card);
-  border-radius:12px;
-  padding:20px;
-  width:420px;
-  box-shadow:0 12px 40px rgba(0,0,0,0.5);
-  display:flex;
-  flex-direction:column;
-  gap:10px;
-  align-items:stretch;
+/* layout */
+.title-inner{max-width:860px;width:100%;display:flex;flex-direction:column;align-items:center;gap:20px;}
+.game-title{
+  font-size:72px;
+  margin:8px 0 0;
+  color:var(--accent-glow);
+  letter-spacing:6px;
+  text-transform:uppercase;
+  text-align:center;
+  font-weight:800;
+  /* neon glow */
+  text-shadow:
+    0 6px 36px rgba(11, 90, 86, 0.14),
+    0 0 36px rgba(21,230,196,0.45),
+    0 0 18px rgba(21,230,196,0.35);
 }
 
-.label{font-size:13px;color:#e6d8c7;margin-bottom:4px}
-input{width:100%;padding:10px 12px;border-radius:8px;border:none;background:rgba(255,255,255,0.03);color:var(--muted);outline:none;font-size:15px}
-.controls{display:flex;justify-content:center;margin-top:6px}
-button{padding:10px 16px;border-radius:8px;border:none;background:var(--accent);color:#2b1b11;font-weight:700;cursor:pointer;font-size:15px}
-.hint{margin-top:8px;font-size:12px;color:rgba(230,216,199,0.85);text-align:center}
-.footer-note{font-size:12px;color:rgba(230,216,199,0.6);margin-top:8px}
+/* smaller subtitle */
+.subtitle{
+  font-size:14px;
+  color:rgba(220,210,196,0.9);
+  letter-spacing:0.6px;
+  margin-top:4px;
+}
+
+/* centered card with input and play button */
+.center-card{
+  margin-top:6px;
+  background: var(--panel);
+  border-radius:10px;
+  padding:26px 34px;
+  width:420px;
+  box-shadow: 0 12px 40px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.02);
+  display:flex;
+  flex-direction:column;
+  gap:14px;
+  align-items:stretch;
+  align-self:center;
+}
+
+/* input */
+.name-input{
+  height:52px;
+  padding:14px 16px;
+  border-radius:8px;
+  border:2px solid rgba(31,179,169,0.16);
+  background: var(--input-bg);
+  color:var(--muted);
+  font-size:16px;
+  outline:none;
+  transition: box-shadow 180ms ease, border-color 180ms ease, transform 120ms ease;
+  box-shadow: 0 0 0 0 rgba(21,230,196,0.0);
+}
+
+/* neon outline on focus */
+.name-input:focus{
+  border-color: rgba(21,230,196,0.95);
+  box-shadow: 0 4px 26px rgba(21,230,196,0.14), 0 0 18px rgba(21,230,196,0.28);
+  transform: translateY(-2px);
+}
+
+/* play button */
+.play-btn{
+  height:56px;
+  border-radius:8px;
+  background: var(--accent-button);
+  color: #062b2a;
+  font-weight:800;
+  font-size:18px;
+  border: 2px solid rgba(21,230,196,0.28);
+  cursor:pointer;
+  transition: transform 120ms ease, box-shadow 160ms ease;
+  box-shadow: 0 8px 30px rgba(8,20,20,0.5);
+  letter-spacing:2px;
+  text-transform:uppercase;
+}
+
+.play-btn:hover{
+  transform: translateY(-3px);
+  box-shadow: 0 12px 40px rgba(8,20,20,0.6), 0 0 20px rgba(21,230,196,0.12);
+}
+
+/* small connected status shown under the button */
+.connect-status{
+  margin-top:6px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:8px;
+  color: #b9f9d6;
+  font-size:13px;
+  opacity:0.95;
+}
+
+.connect-status .check{
+  color: #aaffc9;
+  font-weight:700;
+  text-shadow: 0 1px 6px rgba(21,230,196,0.6);
+}
 
 /* hide title screen when game is active */
 .hidden{display:none}
 
-/* responsive */
+/* responsive tweaks */
 @media (max-width:520px){
-  .center-card{width:92%}
-  .game-title{font-size:40px}
+  .center-card{width:92%;padding:18px}
+  .game-title{font-size:44px}
+  .name-input{height:48px}
+  .play-btn{height:48px;font-size:16px}
 }
