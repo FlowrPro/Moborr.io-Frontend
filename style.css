@@ -1,4 +1,4 @@
-/* Title & Loading screens: neon style matching the provided screenshot, brown background.
+/* Title + Loading screens: neon style matching the provided screenshot, brown background.
    Canvas fills the screen behind the UI. */
 
 :root{
@@ -9,8 +9,8 @@
   --accent-button: linear-gradient(180deg, #1fb3a9, #0f6670);
   --muted: #cdbdae;
   --input-bg: rgba(0,0,0,0.25);
-  --progress-bg: rgba(255,255,255,0.04);
-  --progress-fill: rgba(21,230,196,0.95);
+  --loading-accent: #0fe6c4;
+  --loading-bg: rgba(0,0,0,0.22);
 }
 
 *{box-sizing:border-box}
@@ -36,7 +36,7 @@ canvas{
   align-items:center;
   justify-content:center;
   flex-direction:column;
-  z-index: 3;
+  z-index: 30;
   padding:36px;
 }
 
@@ -122,56 +122,81 @@ canvas{
   box-shadow: 0 12px 40px rgba(8,20,20,0.6), 0 0 20px rgba(21,230,196,0.12);
 }
 
+/* small connected status shown under the button */
+.connect-status{
+  margin-top:6px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:8px;
+  color: #b9f9d6;
+  font-size:13px;
+  opacity:0.95;
+}
+
+.connect-status .check{
+  color: #aaffc9;
+  font-weight:700;
+  text-shadow: 0 1px 6px rgba(21,230,196,0.6);
+}
+
 /* hide title screen when game is active */
 .hidden{display:none}
 
-/* Loading screen (full screen) */
+/* Loading screen: full-screen, centered */
 .loading-screen{
   position:fixed;
   inset:0;
   display:flex;
   align-items:center;
   justify-content:center;
-  z-index:4;
-  padding:36px;
-  background: linear-gradient(180deg, rgba(107,79,58,0.94), rgba(53,35,24,0.92));
+  z-index:40;
+  background: linear-gradient(180deg, rgba(86,53,37,0.95), rgba(49,28,20,0.95));
+  padding:20px;
 }
 
 .loading-inner{
-  width:460px;
+  width:520px;
   max-width:92%;
-  background: rgba(20,14,12,0.3);
-  border-radius:12px;
-  padding:28px;
-  box-shadow: 0 18px 60px rgba(0,0,0,0.6);
   display:flex;
   flex-direction:column;
-  gap:16px;
   align-items:center;
+  gap:18px;
 }
 
-.loading-text{
-  font-size:20px;
-  color:var(--muted);
-  letter-spacing:0.8px;
-  font-weight:600;
+.loading-title{
+  font-size:42px;
+  letter-spacing:3px;
+  color:var(--loading-accent);
+  text-shadow: 0 8px 40px rgba(15,230,196,0.18);
+  font-weight:800;
 }
 
-.progress-bar{
+/* progress bar container */
+.loading-bar-wrap{
   width:100%;
-  height:14px;
-  background: var(--progress-bg);
-  border-radius:10px;
-  overflow:hidden;
+  height:18px;
+  background:var(--loading-bg);
+  border-radius:12px;
+  padding:3px;
   box-shadow: inset 0 1px 0 rgba(255,255,255,0.02);
 }
 
-.progress-fill{
-  height:100%;
+/* actual bar (animated width) */
+.loading-bar{
   width:0%;
-  background: linear-gradient(90deg, rgba(21,230,196,0.95), rgba(21,200,180,0.9));
-  transition: width 220ms ease;
-  box-shadow: 0 6px 30px rgba(21,230,196,0.08);
+  height:100%;
+  border-radius:9px;
+  background: linear-gradient(90deg, rgba(21,230,196,0.95), rgba(10,170,150,0.9));
+  box-shadow: 0 6px 24px rgba(15,230,196,0.16);
+  transition: width 220ms cubic-bezier(.2,.9,.2,1);
+}
+
+/* loading text under bar */
+.loading-text{
+  color: rgba(220,220,210,0.92);
+  font-size:14px;
+  text-align:center;
 }
 
 /* responsive tweaks */
@@ -180,5 +205,5 @@ canvas{
   .game-title{font-size:44px}
   .name-input{height:48px}
   .play-btn{height:48px;font-size:16px}
-  .loading-inner{padding:18px}
+  .loading-title{font-size:28px}
 }
