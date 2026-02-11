@@ -44,6 +44,10 @@ function createInterp() {
   return { targetX: 0, targetY: 0, startX: 0, startY: 0, startTime: 0, endTime: 0 };
 }
 
+// --- Grass pattern variables (moved above resizeCanvas to avoid TDZ) ---
+let grassPattern = null;
+let grassPatternSize = 128;
+
 // Dynamically create the loading overlay when needed
 function createLoadingOverlay() {
   if (loadingScreen) return;
@@ -153,8 +157,6 @@ resizeCanvas();
 // --- Grass background pattern ---
 // We'll create an offscreen canvas pattern that looks like small grassy blades.
 // The pattern is anchored to world coordinates so it scrolls with the camera.
-let grassPattern = null;
-let grassPatternSize = 128;
 function createGrassPattern() {
   grassPatternSize = Math.max(64, Math.round(Math.min(160, 128 * (dpr || 1))));
   const c = document.createElement('canvas');
@@ -399,7 +401,6 @@ window.addEventListener('keyup', (e) => {
 });
 
 // Rendering: camera follows local player; draw only what's visible
-const tileSize = 40;
 function worldToScreen(wx, wy, camX, camY) {
   return { x: wx - camX, y: wy - camY };
 }
