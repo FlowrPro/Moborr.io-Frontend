@@ -7,14 +7,28 @@
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
-  <div id="title-overlay" class="overlay">
-    <div class="card">
-      <h1>Moborr.io</h1>
-      <input id="username" placeholder="Enter username" maxlength="16" autofocus />
-      <div class="controls">
-        <button id="joinBtn">Join</button>
+  <!-- Full title screen -->
+  <div id="title-screen" class="title-screen">
+    <div class="title-inner">
+      <h1 class="game-title">Moborr.io</h1>
+
+      <div class="center-card">
+        <label class="label">Username</label>
+        <input id="username" placeholder="Enter username" maxlength="20" />
+
+        <label class="label">Server URL</label>
+        <input id="serverUrl" placeholder="e.g. https://your-backend.onrender.com" />
+
+        <div class="controls">
+          <button id="joinBtn">Play</button>
+        </div>
+
+        <p class="hint">Use WASD or arrow keys to move. Enter your backend URL if not using same origin.</p>
+
+        <div id="connectStatus" class="status" aria-live="polite" hidden></div>
       </div>
-      <p class="hint">Use WASD or arrow keys to move. You get client-side responsiveness with server reconciliation.</p>
+
+      <div class="footer-note">Host backend on Render, frontend on Netlify — enter backend URL above if separate.</div>
     </div>
   </div>
 
