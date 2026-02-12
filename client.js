@@ -39,6 +39,7 @@ let playerInventory = []; // Array of petal instances
 let hotbar = new Array(8).fill(null); // 8 slots, null = empty
 let selectedHotbarSlot = null;
 let inventoryOpen = false;
+let hoveredPetal = null; // Track which petal is currently hovered
 
 // Networking / rates
 const SEND_RATE = 30;
@@ -493,39 +494,6 @@ function drawWalls(camX, camY, vw, vh) {
   }
 }
 
-// Create drag image for petals
-function createDragImage(petal) {
-  const canvas = document.createElement('canvas');
-  canvas.width = 80;
-  canvas.height = 100;
-  const ctx = canvas.getContext('2d');
-
-  // Background with rarity color
-  const rarityColor = RARITY_COLORS[petal.rarity];
-  ctx.fillStyle = rarityColor + '80'; // semi-transparent
-  ctx.fillRect(0, 0, 80, 80);
-
-  // Border
-  ctx.strokeStyle = rarityColor;
-  ctx.lineWidth = 3;
-  ctx.strokeRect(1.5, 1.5, 77, 77);
-
-  // Load and draw petal icon
-  const img = new Image();
-  img.onload = () => {
-    ctx.drawImage(img, 10, 10, 60, 60);
-    
-    // Draw name below
-    ctx.fillStyle = '#fff';
-    ctx.font = 'bold 11px system-ui';
-    ctx.textAlign = 'center';
-    ctx.fillText(petal.name, 40, 95);
-  };
-  img.src = petal.icon;
-
-  return canvas;
-}
-
 // Inventory UI functions
 function createInventoryUI() {
   let inv = document.getElementById('inventory-container');
@@ -545,7 +513,7 @@ function createInventoryUI() {
 
   const dragHint = document.createElement('div');
   dragHint.className = 'inventory-hint';
-  dragHint.textContent = 'Drag a petal to equip it';
+  dragHint.textContent = 'Hover over a petal and press 1-8 to equip to hotbar';
 
   const grid = document.createElement('div');
   grid.className = 'inventory-grid';
@@ -563,27 +531,6 @@ function createInventoryUI() {
   // Close when clicking outside
   container.addEventListener('click', (e) => {
     if (e.target === container) toggleInventory();
-  });
-
-  // Allow drag and drop back to inventory
-  panel.addEventListener('dragover', (e) => {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
-  });
-
-  panel.addEventListener('drop', (e) => {
-    e.preventDefault();
-    
-    try {
-      const data = JSON.parse(e.dataTransfer.getData('text/plain'));
-      if (data.type === 'hotbar') {
-        // Remove from hotbar (drag back to inventory = unequip)
-        hotbar[data.slot] = null;
-        renderHotbar();
-      }
-    } catch (err) {
-      console.error('Error in inventory drop handler', err);
-    }
   });
 }
 
@@ -656,19 +603,13 @@ function renderInventoryGrid() {
 
       // Add tooltip
       item.addEventListener('mouseenter', (e) => {
+        hoveredPetal = petal;
         showTooltip(e, petal);
       });
-      item.addEventListener('mouseleave', hideTooltip);
-
-      // Drag from inventory
-      item.draggable = true;
-      item.addEventListener('dragstart', (e) => {
-        e.dataTransfer.effectAllowed = 'move';
-        e.dataTransfer.setData('text/plain', JSON.stringify({ type: 'inventory', petal: petal }));
-        
-        // Create custom drag image
-        const dragImg = createDragImage(petal);
-        e.dataTransfer.setDragImage(dragImg, 40, 40);
+      
+      item.addEventListener('mouseleave', () => {
+        hoveredPetal = null;
+        hideTooltip();
       });
 
       rarityGrid.appendChild(item);
@@ -705,7 +646,22 @@ function createHotbarUI() {
     slot.appendChild(qty);
     slot.appendChild(label);
 
-    // Drag and drop - accept items from inventory
+    // Allow dragging FROM hotbar
+    slot.addEventListener('dragstart', (e) => {
+      const petal = hotbar[i];
+      if (!petal) return;
+      
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', JSON.stringify({ type: 'hotbar', slot: i, petal: petal }));
+      
+      slot.style.opacity = '0.5';
+    });
+
+    slot.addEventListener('dragend', () => {
+      slot.style.opacity = '1';
+    });
+
+    // Accept drops from other hotbar slots
     slot.addEventListener('dragover', (e) => {
       e.preventDefault();
       e.dataTransfer.dropEffect = 'move';
@@ -722,10 +678,7 @@ function createHotbarUI() {
       
       try {
         const data = JSON.parse(e.dataTransfer.getData('text/plain'));
-        if (data.type === 'inventory') {
-          // Dragging from inventory to hotbar
-          equipToHotbar(data.petal, i);
-        } else if (data.type === 'hotbar') {
+        if (data.type === 'hotbar') {
           // Swap between hotbar slots
           const tempPetal = hotbar[i];
           hotbar[i] = hotbar[data.slot];
@@ -737,25 +690,6 @@ function createHotbarUI() {
       }
     });
 
-    // Allow dragging FROM hotbar
-    slot.addEventListener('dragstart', (e) => {
-      const petal = hotbar[i];
-      if (!petal) return;
-      
-      e.dataTransfer.effectAllowed = 'move';
-      e.dataTransfer.setData('text/plain', JSON.stringify({ type: 'hotbar', slot: i, petal: petal }));
-      
-      // Create custom drag image
-      const dragImg = createDragImage(petal);
-      e.dataTransfer.setDragImage(dragImg, 40, 40);
-      
-      slot.style.opacity = '0.5';
-    });
-
-    slot.addEventListener('dragend', () => {
-      slot.style.opacity = '1';
-    });
-
     hotbarContainer.appendChild(slot);
   }
 
@@ -765,11 +699,42 @@ function createHotbarUI() {
 function equipToHotbar(petal, hotbarSlot) {
   if (!petal || hotbarSlot < 0 || hotbarSlot >= 8) return;
 
+  // If there's already a petal in this slot, return it to inventory
+  if (hotbar[hotbarSlot]) {
+    playerInventory.push(hotbar[hotbarSlot]);
+  }
+
   hotbar[hotbarSlot] = petal;
+  
+  // Remove from inventory
+  playerInventory = playerInventory.filter(p => p.instanceId !== petal.instanceId);
+  
   renderHotbar();
+  if (inventoryOpen) {
+    renderInventoryGrid();
+  }
 
   // Tell server
   socket.emit('equipPetal', { petalInstanceId: petal.instanceId, hotbarSlot });
+}
+
+function unequipFromHotbar(hotbarSlot) {
+  if (hotbarSlot < 0 || hotbarSlot >= 8) return;
+
+  const petal = hotbar[hotbarSlot];
+  if (!petal) return;
+
+  // Return to inventory
+  playerInventory.push(petal);
+  hotbar[hotbarSlot] = null;
+
+  renderHotbar();
+  if (inventoryOpen) {
+    renderInventoryGrid();
+  }
+
+  // Tell server
+  socket.emit('unequipPetal', { hotbarSlot });
 }
 
 function renderHotbar() {
@@ -784,6 +749,7 @@ function renderHotbar() {
       qtyEl.innerHTML = '';
       slot.style.borderColor = '#999';
       slot.style.backgroundColor = '#e8e8e8';
+      slot.draggable = false;
       return;
     }
 
@@ -793,6 +759,7 @@ function renderHotbar() {
     
     slot.style.borderColor = '#888';
     slot.style.backgroundColor = '#f5f5f5';
+    slot.draggable = true;
   }
 }
 
@@ -1155,6 +1122,22 @@ window.addEventListener('keydown', (e) => {
   if (e.key.toLowerCase() === 'e' || e.key.toLowerCase() === 'x') {
     toggleInventory();
     return;
+  }
+  
+  // Hotbar equip with number keys (1-8)
+  if (hoveredPetal && /^[1-8]$/.test(e.key)) {
+    const slot = parseInt(e.key) - 1; // Convert 1-8 to 0-7
+    equipToHotbar(hoveredPetal, slot);
+    return;
+  }
+  
+  // Hotbar unequip with 0 key
+  if (/^[0-9]$/.test(e.key)) {
+    const key = parseInt(e.key);
+    if (key === 0) {
+      // 0 unequips from currently hovered slot if we need that
+      return;
+    }
   }
   
   if (['w','a','s','d','ArrowUp','ArrowLeft','ArrowDown','ArrowRight'].includes(e.key)) {
