@@ -504,6 +504,7 @@ function createInventoryUI() {
 
   const panel = document.createElement('div');
   panel.className = 'inventory-panel';
+  panel.id = 'inventory-panel';
 
   const header = document.createElement('div');
   header.className = 'inventory-header';
@@ -556,15 +557,11 @@ function toggleInventory() {
   }
   if (inventoryOpen) {
     renderInventoryGrid();
-    // Position popup next to button
-    const btn = document.getElementById('inventory-btn');
-    if (btn) {
-      const rect = btn.getBoundingClientRect();
-      const panel = document.querySelector('.inventory-panel');
-      if (panel) {
-        panel.style.left = (rect.left - 320) + 'px'; // to the left of button
-        panel.style.top = (rect.top - 400) + 'px'; // above the button
-      }
+    // Position popup centered on screen
+    const panel = document.getElementById('inventory-panel');
+    if (panel) {
+      panel.style.left = 'calc(50% - 190px)'; // Center horizontally (380px width / 2)
+      panel.style.top = 'calc(50% - 300px)'; // Center vertically (600px max height / 2)
     }
   }
 }
@@ -729,15 +726,17 @@ function renderHotbar() {
     if (!petal) {
       iconEl.innerHTML = '';
       qtyEl.innerHTML = '';
-      slot.style.borderColor = '#333';
-      slot.style.backgroundColor = 'rgba(30, 30, 30, 0.5)';
+      slot.style.borderColor = '#999';
+      slot.style.backgroundColor = '#e8e8e8';
       return;
     }
 
     iconEl.innerHTML = `<img src="${petal.icon}" alt="${petal.name}" onerror="this.style.display='none'">`;
     qtyEl.textContent = petal.quantity > 1 ? `×${petal.quantity}` : '';
-    slot.style.borderColor = RARITY_COLORS[petal.rarity];
-    slot.style.backgroundColor = RARITY_COLORS[petal.rarity] + '30';
+    
+    // Adjust colors based on rarity
+    slot.style.borderColor = '#888';
+    slot.style.backgroundColor = '#f5f5f5';
   }
 }
 
@@ -1098,8 +1097,8 @@ const keys = {};
 window.addEventListener('keydown', (e) => {
   if (isTyping()) return;
   
-  // Inventory toggle with E key
-  if (e.key.toLowerCase() === 'e') {
+  // Inventory toggle with E key or X key
+  if (e.key.toLowerCase() === 'e' || e.key.toLowerCase() === 'x') {
     toggleInventory();
     return;
   }
