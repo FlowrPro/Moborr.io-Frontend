@@ -366,6 +366,7 @@ canvas{
   flex-direction: column;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.8);
   backdrop-filter: blur(10px);
+  transition: border-color 200ms ease, box-shadow 200ms ease;
 }
 
 .inventory-header {
@@ -497,6 +498,7 @@ canvas{
   align-items: center;
   justify-content: center;
   overflow: hidden;
+  border-radius: 4px;
 }
 
 .inventory-item-img {
