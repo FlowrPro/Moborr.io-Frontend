@@ -32,117 +32,28 @@ const PETAL_CATEGORIES = {
 // Each petal needs: id, name, category, icon path, description, and type-specific stats
 const PETALS = {
   // ============ HEAL CATEGORY ============
-  bandage: {
-    id: 'bandage',
-    name: 'Bandage',
-    category: PETAL_CATEGORIES.HEAL,
-    icon: '/assets/petals/bandage.png',
-    description: 'A simple healing bandage',
-    healing: 20 // base healing amount at Common rarity
-  },
-
-  regeneration_orb: {
-    id: 'regeneration_orb',
-    name: 'Regeneration Orb',
-    category: PETAL_CATEGORIES.HEAL,
-    icon: '/assets/petals/regeneration_orb.png',
-    description: 'Heals slowly over time',
-    healing: 15,
-    duration: 6000 // ms
-  },
+  // Add HEAL petals here
 
   // ============ CONSUMABLE CATEGORY ============
-  speed_boost: {
-    id: 'speed_boost',
-    name: 'Speed Boost',
-    category: PETAL_CATEGORIES.CONSUMABLE,
-    icon: '/assets/petals/speed_boost.png',
-    description: 'Temporarily increases movement speed',
-    speedMultiplier: 1.5, // base multiplier at Common rarity
-    duration: 5000 // ms
-  },
-
-  agility_potion: {
-    id: 'agility_potion',
-    name: 'Agility Potion',
-    category: PETAL_CATEGORIES.CONSUMABLE,
-    icon: '/assets/petals/agility_potion.png',
-    description: 'Boosts speed and acceleration',
-    speedMultiplier: 2.0,
-    duration: 4000
-  },
+  // Add CONSUMABLE petals here
 
   // ============ DAMAGER CATEGORY ============
-  spike: {
-    id: 'spike',
-    name: 'Spike',
+  fireball: {
+    id: 'fireball',
+    name: 'Fireball',
     category: PETAL_CATEGORIES.DAMAGER,
-    icon: '/assets/petals/spike.png',
-    description: 'A sharp damaging spike',
-    damage: 15,
-    health: 25 // petal health
+    icon: '/assets/petals/fireball.webp',
+    description: 'A burning projectile that explodes on impact',
+    damage: 30,        // base damage at Common (will be multiplied by rarity)
+    health: 35         // petal health/durability
   },
+  // Add more DAMAGER petals here
 
-  sharp_thorn: {
-    id: 'sharp_thorn',
-    name: 'Sharp Thorn',
-    category: PETAL_CATEGORIES.DAMAGER,
-    icon: '/assets/petals/sharp_thorn.png',
-    description: 'A piercing thorn projectile',
-    damage: 20,
-    health: 20
-  },
-  // ADD YOUR NEW PETAL HERE:
-fireball: {
-  id: 'fireball',
-  name: 'Fireball',
-  category: PETAL_CATEGORIES.DAMAGER,
-  icon: '/assets/petals/fireball.webp',
-  description: 'A burning projectile that explodes on impact',
-  damage: 30,        // base damage at Common (will be multiplied by rarity)
-  health: 35         // petal health/durability
-},
   // ============ SHOOTABLE CATEGORY ============
-  pebble_shot: {
-    id: 'pebble_shot',
-    name: 'Pebble Shot',
-    category: PETAL_CATEGORIES.SHOOTABLE,
-    icon: '/assets/petals/pebble_shot.png',
-    description: 'Shoots small pebbles',
-    damage: 5,
-    fireRate: 600 // ms between shots
-  },
-
-  laser_beam: {
-    id: 'laser_beam',
-    name: 'Laser Beam',
-    category: PETAL_CATEGORIES.SHOOTABLE,
-    icon: '/assets/petals/laser_beam.png',
-    description: 'Rapid laser fire',
-    damage: 8,
-    fireRate: 300
-  },
+  // Add SHOOTABLE petals here
 
   // ============ BUFF CATEGORY ============
-  defense_shield: {
-    id: 'defense_shield',
-    name: 'Defense Shield',
-    category: PETAL_CATEGORIES.BUFF,
-    icon: '/assets/petals/defense_shield.png',
-    description: 'Reduces incoming damage',
-    defenseMultiplier: 0.7, // reduces damage by 30% (70% of damage taken)
-    duration: 8000
-  },
-
-  iron_skin: {
-    id: 'iron_skin',
-    name: 'Iron Skin',
-    category: PETAL_CATEGORIES.BUFF,
-    icon: '/assets/petals/iron_skin.png',
-    description: 'Hardens your body temporarily',
-    defenseMultiplier: 0.5, // reduces damage by 50%
-    duration: 6000
-  }
+  // Add BUFF petals here
 };
 
 // Create a petal instance with rarity
