@@ -1,4 +1,4 @@
-// Moborr.io client — velocity-based extrapolation for smooth movement
+// Moborr.io client — ultra-smooth velocity-based movement with adaptive smoothing
 const DEFAULT_BACKEND = 'https://moborr-io-backend.onrender.com';
 
 const canvas = document.getElementById('gameCanvas');
@@ -31,14 +31,14 @@ function loadPlayerImage() {
 }
 
 // Game state
-const players = new Map(); // id -> player object
+const players = new Map();
 const pendingInputs = [];
 
 // Networking / rates
-const SEND_RATE = 30; // inputs per second (client -> server)
+const SEND_RATE = 30;
 const INPUT_DT = 1 / SEND_RATE;
-const SERVER_TICK_RATE = 30; // server snapshot rate
-const SPEED = 260; // px/sec
+const SERVER_TICK_RATE = 30;
+const SPEED = 260;
 
 // Avatar / visuals
 const PLAYER_RADIUS = 26;
@@ -48,7 +48,6 @@ const MAP = { width: 12000, height: 12000, padding: 16 };
 
 let localState = { x: MAP.width / 2, y: MAP.height / 2, vx: 0, vy: 0 };
 let inputSeq = 0;
-let lastServerX = 0, lastServerY = 0, lastServerTime = 0;
 
 // Input state
 const keys = {};
@@ -269,16 +268,16 @@ function setupSocket(username, serverUrl) {
         color: p.color || '#29a',
         dispX: p.x,
         dispY: p.y,
-        lastUpdateTime: Date.now()
+        lastUpdateTime: Date.now(),
+        smoothX: p.x,
+        smoothY: p.y,
+        correctionDist: 0
       });
       if (p.id === myId) {
         localState.x = p.x;
         localState.y = p.y;
         localState.vx = p.vx || 0;
         localState.vy = p.vy || 0;
-        lastServerX = p.x;
-        lastServerY = p.y;
-        lastServerTime = Date.now();
       }
     });
 
@@ -306,7 +305,10 @@ function setupSocket(username, serverUrl) {
       color: p.color || '#29a',
       dispX: p.x,
       dispY: p.y,
-      lastUpdateTime: Date.now()
+      lastUpdateTime: Date.now(),
+      smoothX: p.x,
+      smoothY: p.y,
+      correctionDist: 0
     });
   });
 
@@ -330,16 +332,17 @@ function setupSocket(username, serverUrl) {
           color: sp.color || '#29a',
           dispX: sp.x,
           dispY: sp.y,
-          lastUpdateTime: now
+          lastUpdateTime: now,
+          smoothX: sp.x,
+          smoothY: sp.y,
+          correctionDist: 0
         });
         continue;
       }
 
       if (sp.id === myId) {
-        // For local player: use server state but keep local prediction
+        // Local player reconciliation
         const serverSeq = sp.lastProcessedInput || 0;
-
-        // Reconcile: reset to server, reapply pending
         localState.x = sp.x;
         localState.y = sp.y;
         localState.vx = sp.vx || 0;
@@ -350,24 +353,32 @@ function setupSocket(username, serverUrl) {
         pendingInputs.splice(0, i);
         for (const inpt of pendingInputs) applyInputToState(localState, inpt.input, inpt.dt);
 
-        // Update player object with reconciled state
         existing.x = localState.x;
         existing.y = localState.y;
         existing.vx = localState.vx;
         existing.vy = localState.vy;
-        existing.dispX = localState.x;
-        existing.dispY = localState.y;
-        lastServerX = sp.x;
-        lastServerY = sp.y;
-        lastServerTime = now;
+        existing.smoothX = localState.x;
+        existing.smoothY = localState.y;
+        existing.lastUpdateTime = now;
       } else {
-        // Remote players: use velocity extrapolation
+        // Remote players: smooth velocity changes gradually
+        const oldVx = existing.vx;
+        const oldVy = existing.vy;
+        
+        // Calculate distance from extrapolated position to actual position
+        const timeSinceUpdate = (now - existing.lastUpdateTime) / 1000;
+        const extrapolatedX = existing.x + existing.vx * timeSinceUpdate;
+        const extrapolatedY = existing.y + existing.vy * timeSinceUpdate;
+        
+        const corrDist = Math.hypot(sp.x - extrapolatedX, sp.y - extrapolatedY);
+        existing.correctionDist = corrDist;
+
         existing.x = sp.x;
         existing.y = sp.y;
         existing.vx = sp.vx || 0;
         existing.vy = sp.vy || 0;
-        existing.dispX = sp.x;
-        existing.dispY = sp.y;
+        existing.smoothX = sp.x;
+        existing.smoothY = sp.y;
         existing.lastUpdateTime = now;
       }
     }
@@ -466,25 +477,40 @@ function drawPlayerAvatar(screenX, screenY, radius, p) {
   }
 }
 
-// Draw players with velocity extrapolation
+// Draw players with smooth extrapolation
 let lastFrameTime = performance.now();
 function drawPlayers(camX, camY, now, dtSeconds) {
   for (const p of players.values()) {
     if (p.dispX === undefined) p.dispX = p.x;
     if (p.dispY === undefined) p.dispY = p.y;
     if (p.lastUpdateTime === undefined) p.lastUpdateTime = now;
+    if (p.smoothX === undefined) p.smoothX = p.x;
+    if (p.smoothY === undefined) p.smoothY = p.y;
 
-    // Extrapolate based on velocity
-    const timeSinceUpdate = (now - p.lastUpdateTime) / 1000; // convert to seconds
-    
     if (p.id === myId) {
-      // Local player: use localState directly (already prediction + reconciliation)
+      // Local player: use direct position with minimal smoothing
       p.dispX = localState.x;
       p.dispY = localState.y;
     } else {
-      // Remote players: extrapolate using velocity
-      p.dispX = p.x + p.vx * timeSinceUpdate;
-      p.dispY = p.y + p.vy * timeSinceUpdate;
+      // Remote players: extrapolate with damped smoothing
+      const timeSinceUpdate = (now - p.lastUpdateTime) / 1000;
+      
+      // Extrapolate based on velocity
+      const extrapolX = p.x + p.vx * timeSinceUpdate;
+      const extrapolY = p.y + p.vy * timeSinceUpdate;
+      
+      // Smooth damping factor - smoother the farther away the prediction is
+      const predictDist = Math.hypot(p.vx, p.vy);
+      const dampFactor = Math.min(1, 1 - (p.correctionDist || 0) / 300);
+      
+      // Blend smoothly toward extrapolated position
+      const smoothSpeed = 0.15; // controls how fast smooth position catches up
+      p.dispX = p.smoothX + (extrapolX - p.smoothX) * smoothSpeed;
+      p.dispY = p.smoothY + (extrapolY - p.smoothY) * smoothSpeed;
+      
+      // Update smooth position tracker
+      p.smoothX = p.dispX;
+      p.smoothY = p.dispY;
     }
 
     const screen = worldToScreen(p.dispX, p.dispY, camX, camY);
@@ -492,7 +518,6 @@ function drawPlayers(camX, camY, now, dtSeconds) {
 
     drawPlayerAvatar(screen.x, screen.y, PLAYER_RADIUS, p);
 
-    // name
     ctx.fillStyle = 'rgba(255,255,255,0.95)';
     ctx.font = '12px system-ui, Arial';
     ctx.textAlign = 'center';
