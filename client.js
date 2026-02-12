@@ -1074,11 +1074,10 @@ joinBtn.addEventListener('click', () => {
     createInventoryUI();
     createHotbarUI();
     
-    // Add test petals to inventory
-    const testPetal1 = createPetal('basic_heal', 'Common');
-    const testPetal2 = createPetal('speed_boost', 'Uncommon');
-    const testPetal3 = createPetal('damage_petal', 'Rare');
-    const testPetal4 = createPetal('basic_heal', 'Legendary');
+                const testPetal1 = createPetal('fireball', 'Common');
+    const testPetal2 = createPetal('fireball', 'Uncommon');
+    const testPetal3 = createPetal('fireball', 'Rare');
+    const testPetal4 = createPetal('fireball', 'Legendary');
     playerInventory = [testPetal1, testPetal2, testPetal3, testPetal4];
     renderInventoryGrid();
     
