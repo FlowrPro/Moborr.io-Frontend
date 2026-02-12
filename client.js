@@ -701,13 +701,18 @@ function equipToHotbar(petal, hotbarSlot) {
 
   // If there's already a petal in this slot, return it to inventory
   if (hotbar[hotbarSlot]) {
-    playerInventory.push(hotbar[hotbarSlot]);
+    const unequippedPetal = hotbar[hotbarSlot];
+    playerInventory.push(unequippedPetal);
   }
 
+  // Remove from inventory by instance ID
+  const petalIndex = playerInventory.findIndex(p => p.instanceId === petal.instanceId);
+  if (petalIndex !== -1) {
+    playerInventory.splice(petalIndex, 1);
+  }
+
+  // Equip to hotbar
   hotbar[hotbarSlot] = petal;
-  
-  // Remove from inventory
-  playerInventory = playerInventory.filter(p => p.instanceId !== petal.instanceId);
   
   renderHotbar();
   if (inventoryOpen) {
@@ -715,7 +720,10 @@ function equipToHotbar(petal, hotbarSlot) {
   }
 
   // Tell server
-  socket.emit('equipPetal', { petalInstanceId: petal.instanceId, hotbarSlot });
+  socket.emit('equipPetal', { 
+    petalInstanceId: petal.instanceId, 
+    hotbarSlot 
+  });
 }
 
 function unequipFromHotbar(hotbarSlot) {
@@ -734,7 +742,10 @@ function unequipFromHotbar(hotbarSlot) {
   }
 
   // Tell server
-  socket.emit('unequipPetal', { hotbarSlot });
+  socket.emit('unequipPetal', { 
+    hotbarSlot,
+    petalInstanceId: petal.instanceId
+  });
 }
 
 function renderHotbar() {
@@ -753,12 +764,13 @@ function renderHotbar() {
       return;
     }
 
-    // Display petal image in hotbar
+    // Display petal image in hotbar with rarity coloring
     iconEl.innerHTML = `<img src="${petal.icon}" alt="${petal.name}" class="hotbar-item-img">`;
     qtyEl.textContent = petal.quantity > 1 ? `×${petal.quantity}` : '';
     
-    slot.style.borderColor = '#888';
-    slot.style.backgroundColor = '#f5f5f5';
+    // Apply rarity colors to hotbar slot
+    slot.style.borderColor = RARITY_COLORS[petal.rarity];
+    slot.style.backgroundColor = RARITY_COLORS[petal.rarity] + '40';
     slot.draggable = true;
   }
 }
@@ -1129,15 +1141,6 @@ window.addEventListener('keydown', (e) => {
     const slot = parseInt(e.key) - 1; // Convert 1-8 to 0-7
     equipToHotbar(hoveredPetal, slot);
     return;
-  }
-  
-  // Hotbar unequip with 0 key
-  if (/^[0-9]$/.test(e.key)) {
-    const key = parseInt(e.key);
-    if (key === 0) {
-      // 0 unequips from currently hovered slot if we need that
-      return;
-    }
   }
   
   if (['w','a','s','d','ArrowUp','ArrowLeft','ArrowDown','ArrowRight'].includes(e.key)) {
