@@ -609,7 +609,9 @@ function renderInventoryGrid() {
       item.style.backgroundColor = RARITY_COLORS[petal.rarity] + '40';
       
       item.innerHTML = `
-        <img src="${petal.icon}" alt="${petal.name}" class="inventory-item-icon" onerror="this.style.display='none'">
+        <div class="inventory-item-icon">
+          <img src="${petal.icon}" alt="${petal.name}" class="inventory-item-img">
+        </div>
         <div class="inventory-item-label">${petal.name}</div>
         <div class="inventory-item-qty">×${petal.quantity}</div>
       `;
@@ -731,10 +733,10 @@ function renderHotbar() {
       return;
     }
 
-    iconEl.innerHTML = `<img src="${petal.icon}" alt="${petal.name}" onerror="this.style.display='none'">`;
+    // Display petal image in hotbar
+    iconEl.innerHTML = `<img src="${petal.icon}" alt="${petal.name}" class="hotbar-item-img">`;
     qtyEl.textContent = petal.quantity > 1 ? `×${petal.quantity}` : '';
     
-    // Adjust colors based on rarity
     slot.style.borderColor = '#888';
     slot.style.backgroundColor = '#f5f5f5';
   }
@@ -749,11 +751,11 @@ function showTooltip(event, petal) {
   tooltipEl.innerHTML = `
     <div class="tooltip-name">${petal.name}</div>
     <div class="tooltip-rarity" style="color: ${RARITY_COLORS[petal.rarity]}">${petal.rarity}</div>
-    <div class="tooltip-type">${petal.type}</div>
+    <div class="tooltip-category">${petal.category}</div>
     <div class="tooltip-description">${petal.description}</div>
-    ${petal.baseValue !== undefined ? `<div class="tooltip-stat">Value: ${petal.baseValue.toFixed(1)}</div>` : ''}
-    ${petal.baseDamage !== undefined ? `<div class="tooltip-stat">Damage: ${petal.baseDamage.toFixed(1)}</div>` : ''}
-    ${petal.baseHealth !== undefined ? `<div class="tooltip-stat">Health: ${petal.baseHealth.toFixed(1)}</div>` : ''}
+    ${petal.healing !== undefined ? `<div class="tooltip-stat">Healing: ${petal.healing.toFixed(1)}</div>` : ''}
+    ${petal.damage !== undefined ? `<div class="tooltip-stat">Damage: ${petal.damage.toFixed(1)}</div>` : ''}
+    ${petal.health !== undefined ? `<div class="tooltip-stat">Health: ${petal.health.toFixed(1)}</div>` : ''}
   `;
 
   document.body.appendChild(tooltipEl);
@@ -1074,7 +1076,8 @@ joinBtn.addEventListener('click', () => {
     createInventoryUI();
     createHotbarUI();
     
-                const testPetal1 = createPetal('fireball', 'Common');
+    // Add test petals to inventory
+    const testPetal1 = createPetal('fireball', 'Common');
     const testPetal2 = createPetal('fireball', 'Uncommon');
     const testPetal3 = createPetal('fireball', 'Rare');
     const testPetal4 = createPetal('fireball', 'Legendary');
