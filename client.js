@@ -1,4 +1,4 @@
-// Moborr.io client — smooth movement, no bobbing
+// Moborr.io client — velocity-based extrapolation for smooth movement
 const DEFAULT_BACKEND = 'https://moborr-io-backend.onrender.com';
 
 const canvas = document.getElementById('gameCanvas');
@@ -24,7 +24,7 @@ function loadPlayerImage() {
     };
     img.onerror = () => {
       console.warn('Failed to load player image, will use fallback');
-      resolve(); // resolve anyway to not block game
+      resolve();
     };
     img.src = '/assets/player.png';
   });
@@ -37,17 +37,18 @@ const pendingInputs = [];
 // Networking / rates
 const SEND_RATE = 30; // inputs per second (client -> server)
 const INPUT_DT = 1 / SEND_RATE;
-const SERVER_TICK_RATE = 30; // server snapshot rate (should match server)
-const SPEED = 260; // px/sec (must match server)
+const SERVER_TICK_RATE = 30; // server snapshot rate
+const SPEED = 260; // px/sec
 
 // Avatar / visuals
-const PLAYER_RADIUS = 26; // size similar to florr.io
+const PLAYER_RADIUS = 26;
 
 // Map
 const MAP = { width: 12000, height: 12000, padding: 16 };
 
 let localState = { x: MAP.width / 2, y: MAP.height / 2, vx: 0, vy: 0 };
 let inputSeq = 0;
+let lastServerX = 0, lastServerY = 0, lastServerTime = 0;
 
 // Input state
 const keys = {};
@@ -61,9 +62,6 @@ function getInputVector() {
   if (len > 1e-6) { x /= len; y /= len; }
   return { x, y };
 }
-function createInterp() {
-  return { targetX: 0, targetY: 0, startX: 0, startY: 0, startTime: 0, endTime: 0 };
-}
 
 // --- Grass pattern setup ---
 let grassPattern = null;
@@ -76,18 +74,15 @@ function createGrassPattern() {
   c.height = grassPatternSize;
   const g = c.getContext('2d');
 
-  // base green
   g.fillStyle = '#4aa04a';
   g.fillRect(0, 0, c.width, c.height);
 
-  // subtle darker stripes
   g.fillStyle = 'rgba(38, 94, 38, 0.06)';
   for (let i = 0; i < 6; i++) {
     const y = Math.random() * c.height;
     g.fillRect(0, y, c.width, 1 + Math.random() * 2);
   }
 
-  // blades of grass
   for (let i = 0; i < c.width * c.height / 120; i++) {
     const x = Math.random() * c.width;
     const y = Math.random() * c.height;
@@ -102,7 +97,6 @@ function createGrassPattern() {
     g.stroke();
   }
 
-  // small flowers/dots
   for (let i = 0; i < 8; i++) {
     g.fillStyle = ['#ffd24a', '#ffe08b', '#ffd1e6'][Math.floor(Math.random() * 3)];
     g.beginPath();
@@ -115,7 +109,7 @@ function createGrassPattern() {
   grassPattern = ctx.createPattern(c, 'repeat');
 }
 
-// Loading overlay (created dynamically to avoid covering title on load)
+// Loading overlay
 function createLoadingOverlay() {
   if (loadingScreen) return;
   const overlay = document.createElement('div');
@@ -145,6 +139,7 @@ function createLoadingOverlay() {
 
   loadingScreen = overlay;
 }
+
 function showLoading(username) {
   createLoadingOverlay();
   const main = loadingScreen.querySelector('#loading-main');
@@ -155,6 +150,7 @@ function showLoading(username) {
   if (uname) uname.textContent = username || '';
   if (!document.body.contains(loadingScreen)) document.body.appendChild(loadingScreen);
 }
+
 function setLoadingError(text) {
   createLoadingOverlay();
   const main = loadingScreen.querySelector('#loading-main');
@@ -165,6 +161,7 @@ function setLoadingError(text) {
   if (uname) uname.textContent = '';
   if (!document.body.contains(loadingScreen)) document.body.appendChild(loadingScreen);
 }
+
 function hideLoading() {
   if (loadingScreen && document.body.contains(loadingScreen)) document.body.removeChild(loadingScreen);
 }
@@ -270,13 +267,18 @@ function setupSocket(username, serverUrl) {
         vx: p.vx || 0,
         vy: p.vy || 0,
         color: p.color || '#29a',
-        interp: createInterp(),
         dispX: p.x,
-        dispY: p.y
+        dispY: p.y,
+        lastUpdateTime: Date.now()
       });
       if (p.id === myId) {
-        // initialize localState to server-provided spawn
-        localState.x = p.x; localState.y = p.y; localState.vx = p.vx || 0; localState.vy = p.vy || 0;
+        localState.x = p.x;
+        localState.y = p.y;
+        localState.vx = p.vx || 0;
+        localState.vy = p.vy || 0;
+        lastServerX = p.x;
+        lastServerY = p.y;
+        lastServerTime = Date.now();
       }
     });
 
@@ -302,9 +304,9 @@ function setupSocket(username, serverUrl) {
       vx: p.vx || 0,
       vy: p.vy || 0,
       color: p.color || '#29a',
-      interp: createInterp(),
       dispX: p.x,
-      dispY: p.y
+      dispY: p.y,
+      lastUpdateTime: Date.now()
     });
   });
 
@@ -316,68 +318,63 @@ function setupSocket(username, serverUrl) {
     const now = Date.now();
     for (const sp of data.players) {
       const existing = players.get(sp.id);
+      
       if (!existing) {
         players.set(sp.id, {
           id: sp.id,
           username: sp.username,
           x: sp.x,
           y: sp.y,
-          vx: sp.vx,
-          vy: sp.vy,
+          vx: sp.vx || 0,
+          vy: sp.vy || 0,
           color: sp.color || '#29a',
-          interp: createInterp(),
           dispX: sp.x,
-          dispY: sp.y
+          dispY: sp.y,
+          lastUpdateTime: now
         });
         continue;
       }
 
       if (sp.id === myId) {
-        // authoritative server position for me: reconcile
+        // For local player: use server state but keep local prediction
         const serverSeq = sp.lastProcessedInput || 0;
 
-        // update authoritative values
-        existing.x = sp.x; existing.y = sp.y; existing.vx = sp.vx; existing.vy = sp.vy;
+        // Reconcile: reset to server, reapply pending
+        localState.x = sp.x;
+        localState.y = sp.y;
+        localState.vx = sp.vx || 0;
+        localState.vy = sp.vy || 0;
 
-        // set localState to server position, then reapply pending inputs (reconciliation)
-        localState.x = sp.x; localState.y = sp.y; localState.vx = sp.vx; localState.vy = sp.vy;
         let i = 0;
         while (i < pendingInputs.length && pendingInputs[i].seq <= serverSeq) i++;
         pendingInputs.splice(0, i);
         for (const inpt of pendingInputs) applyInputToState(localState, inpt.input, inpt.dt);
 
-        // Update player's authoritative fields
+        // Update player object with reconciled state
         existing.x = localState.x;
         existing.y = localState.y;
         existing.vx = localState.vx;
         existing.vy = localState.vy;
-
-        // Set smooth interpolation target for visual smoothing
-        const interp = existing.interp || createInterp();
-        interp.startX = interp.targetX || existing.x;
-        interp.startY = interp.targetY || existing.y;
-        interp.targetX = existing.x;
-        interp.targetY = existing.y;
-        interp.startTime = now;
-        interp.endTime = now + 100; // longer interpolation window = smoother
-        existing.interp = interp;
+        existing.dispX = localState.x;
+        existing.dispY = localState.y;
+        lastServerX = sp.x;
+        lastServerY = sp.y;
+        lastServerTime = now;
       } else {
-        // remote player: set interpolation targets
-        const interp = existing.interp || createInterp();
-        interp.startX = existing.x; interp.startY = existing.y;
-        interp.targetX = sp.x; interp.targetY = sp.y;
-        interp.startTime = now;
-        interp.endTime = now + 100; // longer interpolation window = smoother
-        existing.vx = sp.vx; existing.vy = sp.vy;
+        // Remote players: use velocity extrapolation
         existing.x = sp.x;
         existing.y = sp.y;
-        existing.interp = interp;
+        existing.vx = sp.vx || 0;
+        existing.vy = sp.vy || 0;
+        existing.dispX = sp.x;
+        existing.dispY = sp.y;
+        existing.lastUpdateTime = now;
       }
     }
   });
 }
 
-// Apply input to a predicted state (client-side prediction)
+// Apply input to state
 function applyInputToState(state, input, dt) {
   state.vx = input.x * SPEED;
   state.vy = input.y * SPEED;
@@ -387,7 +384,7 @@ function applyInputToState(state, input, dt) {
   state.y = Math.max(MAP.padding, Math.min(MAP.height - MAP.padding, state.y));
 }
 
-// Input loop (ensure single interval)
+// Input loop
 let sendInterval = null;
 function startInputLoop() {
   if (!socket || sendInterval) return;
@@ -396,12 +393,19 @@ function startInputLoop() {
     inputSeq++;
     socket.emit('input', { seq: inputSeq, dt: INPUT_DT, input });
     pendingInputs.push({ seq: inputSeq, dt: INPUT_DT, input });
-    // apply prediction locally
     applyInputToState(localState, input, INPUT_DT);
     const me = players.get(myId);
-    if (me) { me.x = localState.x; me.y = localState.y; me.vx = localState.vx; me.vy = localState.vy; }
+    if (me) {
+      me.x = localState.x;
+      me.y = localState.y;
+      me.vx = localState.vx;
+      me.vy = localState.vy;
+      me.dispX = localState.x;
+      me.dispY = localState.y;
+    }
   }, 1000 / SEND_RATE);
 }
+
 function stopInputLoop() {
   if (sendInterval) clearInterval(sendInterval);
   sendInterval = null;
@@ -418,7 +422,6 @@ joinBtn.addEventListener('click', () => {
   });
 });
 
-// protect typing so movement keys aren't swallowed
 usernameInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') joinBtn.click();
   e.stopPropagation();
@@ -426,21 +429,23 @@ usernameInput.addEventListener('keydown', (e) => {
 usernameInput.addEventListener('keypress', (e) => e.stopPropagation());
 usernameInput.addEventListener('keyup', (e) => e.stopPropagation());
 
-// keyboard handlers (ignore if typing)
 window.addEventListener('keydown', (e) => {
   if (isTyping()) return;
   if (['w','a','s','d','ArrowUp','ArrowLeft','ArrowDown','ArrowRight'].includes(e.key)) {
-    keys[e.key] = true; e.preventDefault();
-  }
-});
-window.addEventListener('keyup', (e) => {
-  if (isTyping()) return;
-  if (['w','a','s','d','ArrowUp','ArrowLeft','ArrowDown','ArrowRight'].includes(e.key)) {
-    keys[e.key] = false; e.preventDefault();
+    keys[e.key] = true;
+    e.preventDefault();
   }
 });
 
-// Avatar drawing - no bobbing, just draw the image
+window.addEventListener('keyup', (e) => {
+  if (isTyping()) return;
+  if (['w','a','s','d','ArrowUp','ArrowLeft','ArrowDown','ArrowRight'].includes(e.key)) {
+    keys[e.key] = false;
+    e.preventDefault();
+  }
+});
+
+// Avatar drawing
 function drawPlayerAvatar(screenX, screenY, radius, p) {
   if (playerImage) {
     ctx.save();
@@ -449,7 +454,6 @@ function drawPlayerAvatar(screenX, screenY, radius, p) {
     ctx.drawImage(playerImage, screenX - radius, screenY - radius, diameter, diameter);
     ctx.restore();
   } else {
-    // Fallback to circle if image not loaded
     ctx.beginPath();
     ctx.fillStyle = '#17b84a';
     ctx.arc(screenX, screenY, radius, 0, Math.PI * 2);
@@ -462,45 +466,25 @@ function drawPlayerAvatar(screenX, screenY, radius, p) {
   }
 }
 
-// Draw players (smooth interpolation)
+// Draw players with velocity extrapolation
 let lastFrameTime = performance.now();
-function drawPlayers(camX, camY, now) {
+function drawPlayers(camX, camY, now, dtSeconds) {
   for (const p of players.values()) {
     if (p.dispX === undefined) p.dispX = p.x;
     if (p.dispY === undefined) p.dispY = p.y;
+    if (p.lastUpdateTime === undefined) p.lastUpdateTime = now;
 
-    // smoothing / display pos using interpolation
+    // Extrapolate based on velocity
+    const timeSinceUpdate = (now - p.lastUpdateTime) / 1000; // convert to seconds
+    
     if (p.id === myId) {
-      // For local player: use interpolation to smooth movements from server corrections
-      if (p.interp && now < p.interp.endTime) {
-        const t = (now - p.interp.startTime) / Math.max(1, p.interp.endTime - p.interp.startTime);
-        const tt = Math.max(0, Math.min(1, t));
-        // Cubic easing for very smooth motion
-        const ease = tt < 0.5 
-          ? 4 * tt * tt * tt 
-          : 1 - Math.pow(-2 * tt + 2, 3) / 2;
-        p.dispX = p.interp.startX + (p.interp.targetX - p.interp.startX) * ease;
-        p.dispY = p.interp.startY + (p.interp.targetY - p.interp.startY) * ease;
-      } else {
-        // Already at target
-        p.dispX = localState.x;
-        p.dispY = localState.y;
-      }
+      // Local player: use localState directly (already prediction + reconciliation)
+      p.dispX = localState.x;
+      p.dispY = localState.y;
     } else {
-      // remote players: smooth interpolation
-      if (p.interp && now < p.interp.endTime) {
-        const t = (now - p.interp.startTime) / Math.max(1, p.interp.endTime - p.interp.startTime);
-        const tt = Math.max(0, Math.min(1, t));
-        // Cubic easing for very smooth motion
-        const ease = tt < 0.5 
-          ? 4 * tt * tt * tt 
-          : 1 - Math.pow(-2 * tt + 2, 3) / 2;
-        p.dispX = p.interp.startX + (p.interp.targetX - p.interp.startX) * ease;
-        p.dispY = p.interp.startY + (p.interp.targetY - p.interp.startY) * ease;
-      } else {
-        p.dispX = p.x;
-        p.dispY = p.y;
-      }
+      // Remote players: extrapolate using velocity
+      p.dispX = p.x + p.vx * timeSinceUpdate;
+      p.dispY = p.y + p.vy * timeSinceUpdate;
     }
 
     const screen = worldToScreen(p.dispX, p.dispY, camX, camY);
@@ -595,11 +579,11 @@ function worldToScreen(wx, wy, camX, camY) {
   return { x: wx - camX, y: wy - camY };
 }
 
-// Render loop with fixed timestep for smoother visuals
+// Render loop
 function render() {
   const nowPerf = performance.now();
   let dt = (nowPerf - lastFrameTime) / 1000;
-  if (dt > 0.05) dt = 0.05; // cap at 50ms to prevent big jumps
+  if (dt > 0.05) dt = 0.05;
   lastFrameTime = nowPerf;
 
   const me = players.get(myId);
@@ -609,7 +593,7 @@ function render() {
   const camY = Math.max(0, Math.min(MAP.height - viewport.h, cy));
 
   drawBackground(camX, camY, viewport.w, viewport.h);
-  drawPlayers(camX, camY, Date.now());
+  drawPlayers(camX, camY, Date.now(), dt);
   drawMinimap(camX, camY);
 
   requestAnimationFrame(render);
