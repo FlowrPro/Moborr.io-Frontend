@@ -49,6 +49,115 @@ const MAP = { width: 12000, height: 12000, padding: 16 };
 let localState = { x: MAP.width / 2, y: MAP.height / 2, vx: 0, vy: 0 };
 let inputSeq = 0;
 
+// Wall system
+const WALLS = [];
+function generateMazeWalls() {
+  // Generate maze-like walls with pockets and open spaces
+  // Similar to the florr.io style maze pattern
+  
+  const wallThickness = 120; // Width of walls
+  const spacing = 300; // Space between wall sections
+  
+  // Horizontal wall segments (creating vertical corridors)
+  for (let x = 0; x < MAP.width; x += spacing * 2) {
+    WALLS.push({
+      x: x,
+      y: MAP.height * 0.2,
+      width: spacing + 200,
+      height: wallThickness,
+      rotation: 0
+    });
+    
+    WALLS.push({
+      x: x + spacing,
+      y: MAP.height * 0.5,
+      width: spacing + 200,
+      height: wallThickness,
+      rotation: 0
+    });
+    
+    WALLS.push({
+      x: x,
+      y: MAP.height * 0.8,
+      width: spacing + 200,
+      height: wallThickness,
+      rotation: 0
+    });
+  }
+  
+  // Vertical wall segments (creating horizontal corridors)
+  for (let y = 0; y < MAP.height; y += spacing * 2) {
+    WALLS.push({
+      x: MAP.width * 0.15,
+      y: y,
+      width: wallThickness,
+      height: spacing + 200,
+      rotation: 0
+    });
+    
+    WALLS.push({
+      x: MAP.width * 0.5,
+      y: y + spacing,
+      width: wallThickness,
+      height: spacing + 200,
+      rotation: 0
+    });
+    
+    WALLS.push({
+      x: MAP.width * 0.85,
+      y: y,
+      width: wallThickness,
+      height: spacing + 200,
+      rotation: 0
+    });
+  }
+  
+  // Add some diagonal/offset walls for more complex layout
+  for (let i = 0; i < 4; i++) {
+    const baseY = i * (MAP.height / 4) + 400;
+    const baseX = i * (MAP.width / 4) + 500;
+    
+    WALLS.push({
+      x: baseX,
+      y: baseY,
+      width: spacing + 150,
+      height: wallThickness,
+      rotation: 0
+    });
+  }
+}
+
+function getWallCollisionBox(wall) {
+  // Return an axis-aligned bounding box for the wall
+  return {
+    x: wall.x,
+    y: wall.y,
+    width: wall.width,
+    height: wall.height
+  };
+}
+
+function checkWallCollision(x, y, radius) {
+  // Check if a point + radius collides with any wall
+  for (const wall of WALLS) {
+    const box = getWallCollisionBox(wall);
+    
+    // Find the closest point on the wall box to the circle center
+    const closestX = Math.max(box.x, Math.min(x, box.x + box.width));
+    const closestY = Math.max(box.y, Math.min(y, box.y + box.height));
+    
+    // Calculate distance
+    const distX = x - closestX;
+    const distY = y - closestY;
+    const distance = Math.sqrt(distX * distX + distY * distY);
+    
+    if (distance < radius) {
+      return true; // Collision detected
+    }
+  }
+  return false;
+}
+
 // Input state
 const keys = {};
 function getInputVector() {
@@ -223,6 +332,28 @@ function drawBackground(camX, camY, vw, vh) {
   ctx.fillRect(0, 0, vw, vh);
 }
 
+// Draw walls
+function drawWalls(camX, camY, vw, vh) {
+  for (const wall of WALLS) {
+    const screenX = wall.x - camX;
+    const screenY = wall.y - camY;
+    
+    // Only draw if wall is visible on screen
+    if (screenX + wall.width < -50 || screenX > vw + 50 ||
+        screenY + wall.height < -50 || screenY > vh + 50) {
+      continue;
+    }
+    
+    ctx.fillStyle = '#1a1a1a';
+    ctx.fillRect(screenX, screenY, wall.width, wall.height);
+    
+    // Add subtle border for definition
+    ctx.strokeStyle = '#0a0a0a';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(screenX, screenY, wall.width, wall.height);
+  }
+}
+
 // Networking / socket
 function setupSocket(username, serverUrl) {
   if (!serverUrl) serverUrl = DEFAULT_BACKEND;
@@ -391,6 +522,14 @@ function applyInputToState(state, input, dt) {
   state.vy = input.y * SPEED;
   state.x += state.vx * dt;
   state.y += state.vy * dt;
+  
+  // Check collision with walls and revert if necessary
+  if (checkWallCollision(state.x, state.y, PLAYER_RADIUS)) {
+    // Revert to previous position
+    state.x -= state.vx * dt;
+    state.y -= state.vy * dt;
+  }
+  
   state.x = Math.max(MAP.padding, Math.min(MAP.width - MAP.padding, state.x));
   state.y = Math.max(MAP.padding, Math.min(MAP.height - MAP.padding, state.y));
 }
@@ -429,6 +568,7 @@ joinBtn.addEventListener('click', () => {
   titleScreen.classList.add('hidden');
   showLoading(name);
   loadPlayerImage().then(() => {
+    generateMazeWalls(); // Generate walls before game starts
     setupSocket(name, DEFAULT_BACKEND);
   });
 });
@@ -564,6 +704,17 @@ function drawMinimap(camX, camY) {
   roundRect(ctx, x + 0.5, y + 0.5, mmW - 1, mmH - 1, 6);
   ctx.stroke();
 
+  // Draw walls on minimap
+  ctx.fillStyle = 'rgba(0,0,0,0.8)';
+  for (const wall of WALLS) {
+    const mmX = x + (wall.x / MAP.width) * mmW;
+    const mmY = y + (wall.y / MAP.height) * mmH;
+    const mmWallW = (wall.width / MAP.width) * mmW;
+    const mmWallH = (wall.height / MAP.height) * mmH;
+    ctx.fillRect(mmX, mmY, mmWallW, mmWallH);
+  }
+
+  // Draw players
   for (const p of players.values()) {
     const px = x + (p.x / MAP.width) * mmW;
     const py = y + (p.y / MAP.height) * mmH;
@@ -618,6 +769,7 @@ function render() {
   const camY = Math.max(0, Math.min(MAP.height - viewport.h, cy));
 
   drawBackground(camX, camY, viewport.w, viewport.h);
+  drawWalls(camX, camY, viewport.w, viewport.h);
   drawPlayers(camX, camY, Date.now(), dt);
   drawMinimap(camX, camY);
 
