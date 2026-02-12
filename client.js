@@ -982,7 +982,7 @@ function setupSocket(username, serverUrl) {
         console.warn('Socket timeout - no data received');
         socket.disconnect();
       }
-    }, 15000);
+    }, 60000);
   });
 
   socket.on('disconnect', () => {
