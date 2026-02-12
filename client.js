@@ -115,21 +115,11 @@ function generateMazeWalls() {
     height: wallThickness
   });
   
-  // Bottom perimeter wall - long horizontal (split to create entrance)
+  // Bottom perimeter wall - long horizontal
   WALLS.push({
     x: 0,
     y: mapH * 0.8,
-    width: mapW * 0.15,
-    height: wallThickness
-  });
-  
-  // Gap for entrance to middle-bottom square (around x: 0.18-0.25)
-  
-  // Rest of bottom wall after gap
-  WALLS.push({
-    x: mapW * 0.3,
-    y: mapH * 0.8,
-    width: mapW * 0.3,
+    width: mapW * 0.6,
     height: wallThickness
   });
   
@@ -173,105 +163,12 @@ function generateMazeWalls() {
     height: mapH * 0.3
   });
   
-  // Top-right corner tunnel (split to create entrance)
+  // Top-right corner tunnel
   WALLS.push({
     x: mapW * 0.8,
     y: mapH * 0.15,
     width: mapW * 0.2,
-    height: wallThickness * 0.4
-  });
-  
-  // Top-right corner tunnel - second part (gap for entrance in middle)
-  WALLS.push({
-    x: mapW * 0.8,
-    y: mapH * 0.15 + wallThickness * 0.6,
-    width: mapW * 0.2,
-    height: wallThickness * 0.4
-  });
-  
-  // ===== ENCLOSED SQUARES =====
-  
-  // Middle-bottom square walls (creates enclosed area)
-  // Top wall of middle-bottom square
-  WALLS.push({
-    x: mapW * 0.15,
-    y: mapH * 0.7,
-    width: mapW * 0.15,
     height: wallThickness
-  });
-  
-  // Right wall of middle-bottom square
-  WALLS.push({
-    x: mapW * 0.29,
-    y: mapH * 0.7,
-    width: wallThickness,
-    height: mapH * 0.2
-  });
-  
-  // Bottom wall of middle-bottom square
-  WALLS.push({
-    x: mapW * 0.15,
-    y: mapH * 0.88,
-    width: mapW * 0.15,
-    height: wallThickness
-  });
-  
-  // Left wall of middle-bottom square (split to create entrance from bottom-left square)
-  // Left side - partial wall with gap
-  WALLS.push({
-    x: mapW * 0.15,
-    y: mapH * 0.7,
-    width: wallThickness,
-    height: wallThickness * 0.4
-  });
-  
-  // Left side - rest of wall (gap in middle for entrance)
-  WALLS.push({
-    x: mapW * 0.15,
-    y: mapH * 0.7 + wallThickness * 0.6,
-    width: wallThickness,
-    height: mapH * 0.2 - wallThickness * 0.6
-  });
-  
-  // Bottom-left square walls (creates enclosed area)
-  // Top wall of bottom-left square (split to create entrance from middle-bottom square)
-  WALLS.push({
-    x: 0,
-    y: mapH * 0.75,
-    width: mapW * 0.13,
-    height: wallThickness * 0.4
-  });
-  
-  // Top wall of bottom-left square - second part (gap for entrance)
-  WALLS.push({
-    x: 0,
-    y: mapH * 0.75 + wallThickness * 0.6,
-    width: mapW * 0.13,
-    height: wallThickness * 0.4
-  });
-  
-  // Right wall of bottom-left square
-  WALLS.push({
-    x: mapW * 0.12,
-    y: mapH * 0.75,
-    width: wallThickness,
-    height: mapH * 0.25
-  });
-  
-  // Bottom wall of bottom-left square
-  WALLS.push({
-    x: 0,
-    y: mapH * 0.98,
-    width: mapW * 0.13,
-    height: wallThickness
-  });
-  
-  // Left wall of bottom-left square
-  WALLS.push({
-    x: 0,
-    y: mapH * 0.75,
-    width: wallThickness * 0.3,
-    height: mapH * 0.25
   });
 }
 
