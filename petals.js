@@ -1,4 +1,4 @@
-// Petal system - all petal definitions and logic
+// Petal system - Categories are organizational, petals are specific items
 
 // Rarity multipliers - each rarity is 3x stronger than the previous
 const RARITY_MULTIPLIERS = {
@@ -19,8 +19,8 @@ const RARITY_COLORS = {
   'Godly': '#FFFF00'
 };
 
-// Petal Types
-const PETAL_TYPES = {
+// Petal Categories (organizational only)
+const PETAL_CATEGORIES = {
   HEAL: 'heal',
   CONSUMABLE: 'consumable',
   DAMAGER: 'damager',
@@ -28,73 +28,119 @@ const PETAL_TYPES = {
   BUFF: 'buff'
 };
 
-// Base petal definitions - these are templates
-const PETAL_DEFINITIONS = {
-  // HEAL type
-  basic_heal: {
-    id: 'basic_heal',
-    name: 'Heal Petal',
-    type: PETAL_TYPES.HEAL,
-    baseValue: 25, // healing amount at common rarity
-    icon: '/assets/petals/heal.png',
-    description: 'Restores health when used',
-    tooltip: 'Heals your player'
+// ALL PETALS - Add new petals here!
+// Each petal needs: id, name, category, icon path, description, and type-specific stats
+const PETALS = {
+  // ============ HEAL CATEGORY ============
+  bandage: {
+    id: 'bandage',
+    name: 'Bandage',
+    category: PETAL_CATEGORIES.HEAL,
+    icon: '/assets/petals/bandage.png',
+    description: 'A simple healing bandage',
+    healing: 20 // base healing amount at Common rarity
   },
 
-  // CONSUMABLE type
+  regeneration_orb: {
+    id: 'regeneration_orb',
+    name: 'Regeneration Orb',
+    category: PETAL_CATEGORIES.HEAL,
+    icon: '/assets/petals/regeneration_orb.png',
+    description: 'Heals slowly over time',
+    healing: 15,
+    duration: 6000 // ms
+  },
+
+  // ============ CONSUMABLE CATEGORY ============
   speed_boost: {
     id: 'speed_boost',
     name: 'Speed Boost',
-    type: PETAL_TYPES.CONSUMABLE,
-    baseValue: 1.5, // speed multiplier at common rarity
-    duration: 5000, // 5 seconds in ms
-    icon: '/assets/petals/speed.png',
+    category: PETAL_CATEGORIES.CONSUMABLE,
+    icon: '/assets/petals/speed_boost.png',
     description: 'Temporarily increases movement speed',
-    tooltip: 'Boosts speed for 5 seconds'
+    speedMultiplier: 1.5, // base multiplier at Common rarity
+    duration: 5000 // ms
   },
 
-  // DAMAGER type
-  damage_petal: {
-    id: 'damage_petal',
-    name: 'Damage Petal',
-    type: PETAL_TYPES.DAMAGER,
-    baseDamage: 10,
-    baseHealth: 20,
-    icon: '/assets/petals/damage.png',
-    description: 'A damaging projectile petal',
-    tooltip: 'Shoots damaging projectiles'
+  agility_potion: {
+    id: 'agility_potion',
+    name: 'Agility Potion',
+    category: PETAL_CATEGORIES.CONSUMABLE,
+    icon: '/assets/petals/agility_potion.png',
+    description: 'Boosts speed and acceleration',
+    speedMultiplier: 2.0,
+    duration: 4000
   },
 
-  // SHOOTABLE type
-  projectile: {
-    id: 'projectile',
-    name: 'Projectile Petal',
-    type: PETAL_TYPES.SHOOTABLE,
-    baseDamage: 5,
-    fireRate: 500, // ms between shots
-    icon: '/assets/petals/projectile.png',
-    description: 'Continuously shoots projectiles',
-    tooltip: 'Rapid-fire projectiles'
+  // ============ DAMAGER CATEGORY ============
+  spike: {
+    id: 'spike',
+    name: 'Spike',
+    category: PETAL_CATEGORIES.DAMAGER,
+    icon: '/assets/petals/spike.png',
+    description: 'A sharp damaging spike',
+    damage: 15,
+    health: 25 // petal health
   },
 
-  // BUFF type
-  defense_buff: {
-    id: 'defense_buff',
-    name: 'Defense Buff',
-    type: PETAL_TYPES.BUFF,
-    baseValue: 1.3, // defense multiplier
-    duration: 8000, // 8 seconds
-    icon: '/assets/petals/defense.png',
-    description: 'Increases defense temporarily',
-    tooltip: 'Reduces incoming damage'
+  sharp_thorn: {
+    id: 'sharp_thorn',
+    name: 'Sharp Thorn',
+    category: PETAL_CATEGORIES.DAMAGER,
+    icon: '/assets/petals/sharp_thorn.png',
+    description: 'A piercing thorn projectile',
+    damage: 20,
+    health: 20
+  },
+
+  // ============ SHOOTABLE CATEGORY ============
+  pebble_shot: {
+    id: 'pebble_shot',
+    name: 'Pebble Shot',
+    category: PETAL_CATEGORIES.SHOOTABLE,
+    icon: '/assets/petals/pebble_shot.png',
+    description: 'Shoots small pebbles',
+    damage: 5,
+    fireRate: 600 // ms between shots
+  },
+
+  laser_beam: {
+    id: 'laser_beam',
+    name: 'Laser Beam',
+    category: PETAL_CATEGORIES.SHOOTABLE,
+    icon: '/assets/petals/laser_beam.png',
+    description: 'Rapid laser fire',
+    damage: 8,
+    fireRate: 300
+  },
+
+  // ============ BUFF CATEGORY ============
+  defense_shield: {
+    id: 'defense_shield',
+    name: 'Defense Shield',
+    category: PETAL_CATEGORIES.BUFF,
+    icon: '/assets/petals/defense_shield.png',
+    description: 'Reduces incoming damage',
+    defenseMultiplier: 0.7, // reduces damage by 30% (70% of damage taken)
+    duration: 8000
+  },
+
+  iron_skin: {
+    id: 'iron_skin',
+    name: 'Iron Skin',
+    category: PETAL_CATEGORIES.BUFF,
+    icon: '/assets/petals/iron_skin.png',
+    description: 'Hardens your body temporarily',
+    defenseMultiplier: 0.5, // reduces damage by 50%
+    duration: 6000
   }
 };
 
 // Create a petal instance with rarity
 function createPetal(petalId, rarity = 'Common') {
-  const def = PETAL_DEFINITIONS[petalId];
-  if (!def) {
-    console.error('Petal definition not found:', petalId);
+  const petalDef = PETALS[petalId];
+  if (!petalDef) {
+    console.error('Petal not found:', petalId);
     return null;
   }
 
@@ -109,53 +155,32 @@ function createPetal(petalId, rarity = 'Common') {
   const petal = {
     instanceId: Math.random().toString(36).substr(2, 9), // unique instance ID
     id: petalId,
-    name: def.name,
-    type: def.type,
+    name: petalDef.name,
+    category: petalDef.category,
     rarity: rarity,
-    icon: def.icon,
-    description: def.description,
-    tooltip: def.tooltip,
+    icon: petalDef.icon,
+    description: petalDef.description,
     quantity: 1,
     
-    // Apply rarity multiplier to all numeric base values
-    baseValue: def.baseValue ? def.baseValue * multiplier : undefined,
-    baseDamage: def.baseDamage ? def.baseDamage * multiplier : undefined,
-    baseHealth: def.baseHealth ? def.baseHealth * multiplier : undefined,
-    fireRate: def.fireRate, // doesn't scale with rarity
-    duration: def.duration, // doesn't scale with rarity
+    // Apply rarity multiplier to numeric stats
+    healing: petalDef.healing ? petalDef.healing * multiplier : undefined,
+    damage: petalDef.damage ? petalDef.damage * multiplier : undefined,
+    health: petalDef.health ? petalDef.health * multiplier : undefined,
+    speedMultiplier: petalDef.speedMultiplier ? petalDef.speedMultiplier * multiplier : undefined,
+    defenseMultiplier: petalDef.defenseMultiplier,
+    fireRate: petalDef.fireRate, // doesn't scale with rarity
+    duration: petalDef.duration, // doesn't scale with rarity
     
     // Metadata
     createdAt: Date.now(),
-    cooldown: 0 // current cooldown in ms
+    cooldown: 0
   };
 
   return petal;
 }
 
-// Get display info for a petal (for tooltips)
-function getPetalTooltip(petal) {
-  let tooltip = `<div class="petal-tooltip">
-    <div class="petal-name">${petal.name}</div>
-    <div class="petal-rarity" style="color: ${RARITY_COLORS[petal.rarity]}">${petal.rarity}</div>
-    <div class="petal-description">${petal.description}</div>`;
-
-  // Add type-specific info
-  if (petal.baseValue !== undefined) {
-    tooltip += `<div class="petal-stat">Value: ${petal.baseValue.toFixed(1)}</div>`;
-  }
-  if (petal.baseDamage !== undefined) {
-    tooltip += `<div class="petal-stat">Damage: ${petal.baseDamage.toFixed(1)}</div>`;
-  }
-  if (petal.baseHealth !== undefined) {
-    tooltip += `<div class="petal-stat">Health: ${petal.baseHealth.toFixed(1)}</div>`;
-  }
-
-  tooltip += `</div>`;
-  return tooltip;
-}
-
-// Execute petal effect
-function usePetal(petal, playerState, allPlayers) {
+// Execute petal effect based on category
+function usePetal(petal, playerState) {
   const now = Date.now();
   
   // Check cooldown
@@ -164,42 +189,56 @@ function usePetal(petal, playerState, allPlayers) {
     return false;
   }
 
-  switch (petal.type) {
-    case PETAL_TYPES.HEAL:
-      playerState.health = Math.min(playerState.maxHealth, playerState.health + petal.baseValue);
-      petal.cooldown = now + 1000; // 1 second cooldown
+  switch (petal.category) {
+    case PETAL_CATEGORIES.HEAL:
+      // Healing petals restore health
+      if (petal.healing !== undefined) {
+        playerState.health = Math.min(playerState.maxHealth, playerState.health + petal.healing);
+        petal.cooldown = now + 1000; // 1 second cooldown
+      }
       break;
 
-    case PETAL_TYPES.CONSUMABLE:
-      // Apply temporary buff
-      playerState.speedMultiplier = petal.baseValue;
-      petal.cooldown = now + 2000; // 2 second cooldown
-      setTimeout(() => {
-        playerState.speedMultiplier = 1;
-      }, petal.duration);
+    case PETAL_CATEGORIES.CONSUMABLE:
+      // Consumables apply temporary buffs
+      if (petal.speedMultiplier !== undefined) {
+        playerState.speedMultiplier = petal.speedMultiplier;
+        petal.cooldown = now + 500;
+        setTimeout(() => {
+          playerState.speedMultiplier = 1;
+        }, petal.duration);
+      }
       break;
 
-    case PETAL_TYPES.DAMAGER:
-      // Shoot damage petal (would create projectile on client/server)
+    case PETAL_CATEGORIES.DAMAGER:
+      // Damagers shoot projectiles (would be handled by server)
       petal.cooldown = now + 800;
-      return { action: 'shoot', damage: petal.baseDamage, health: petal.baseHealth };
+      return { 
+        action: 'shoot', 
+        damage: petal.damage, 
+        health: petal.health 
+      };
 
-    case PETAL_TYPES.SHOOTABLE:
-      // Continuous fire (handled by client/server projectile system)
+    case PETAL_CATEGORIES.SHOOTABLE:
+      // Shootables continuously fire
       petal.cooldown = now + petal.fireRate;
-      return { action: 'shoot', damage: petal.baseDamage };
+      return { 
+        action: 'shoot', 
+        damage: petal.damage 
+      };
 
-    case PETAL_TYPES.BUFF:
-      // Apply temporary defense buff
-      playerState.defenseMultiplier = petal.baseValue;
-      petal.cooldown = now + 1500;
-      setTimeout(() => {
-        playerState.defenseMultiplier = 1;
-      }, petal.duration);
+    case PETAL_CATEGORIES.BUFF:
+      // Buffs apply temporary stat boosts
+      if (petal.defenseMultiplier !== undefined) {
+        playerState.defenseMultiplier = petal.defenseMultiplier;
+        petal.cooldown = now + 1500;
+        setTimeout(() => {
+          playerState.defenseMultiplier = 1;
+        }, petal.duration);
+      }
       break;
 
     default:
-      console.error('Unknown petal type:', petal.type);
+      console.error('Unknown petal category:', petal.category);
       return false;
   }
 
@@ -209,12 +248,11 @@ function usePetal(petal, playerState, allPlayers) {
 // Export for use in other files
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
-    PETAL_TYPES,
-    PETAL_DEFINITIONS,
+    PETAL_CATEGORIES,
+    PETALS,
     RARITY_MULTIPLIERS,
     RARITY_COLORS,
     createPetal,
-    getPetalTooltip,
     usePetal
   };
 }
