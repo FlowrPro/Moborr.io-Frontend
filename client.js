@@ -502,9 +502,6 @@ function createInventoryUI() {
   container.id = 'inventory-container';
   container.className = 'inventory-container hidden';
 
-  const overlay = document.createElement('div');
-  overlay.className = 'inventory-overlay';
-
   const panel = document.createElement('div');
   panel.className = 'inventory-panel';
 
@@ -512,20 +509,42 @@ function createInventoryUI() {
   header.className = 'inventory-header';
   header.innerHTML = '<h2>Inventory</h2><button class="inventory-close" aria-label="Close inventory">✕</button>';
 
+  const dragHint = document.createElement('div');
+  dragHint.className = 'inventory-hint';
+  dragHint.textContent = 'Drag a petal to equip it';
+
   const grid = document.createElement('div');
   grid.className = 'inventory-grid';
   grid.id = 'inventory-grid';
 
   panel.appendChild(header);
+  panel.appendChild(dragHint);
   panel.appendChild(grid);
-  overlay.appendChild(panel);
-  container.appendChild(overlay);
+  container.appendChild(panel);
   document.body.appendChild(container);
 
   // Close button
   header.querySelector('.inventory-close').addEventListener('click', toggleInventory);
-  overlay.addEventListener('click', (e) => {
-    if (e.target === overlay) toggleInventory();
+
+  // Close when clicking outside
+  container.addEventListener('click', (e) => {
+    if (e.target === container) toggleInventory();
+  });
+
+  // Allow drag and drop back to inventory
+  panel.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+  });
+
+  panel.addEventListener('drop', (e) => {
+    e.preventDefault();
+    const data = JSON.parse(e.dataTransfer.getData('text/plain'));
+    if (data.type === 'hotbar') {
+      // Remove from hotbar (drag back to inventory = unequip)
+      hotbar[data.slot] = null;
+      renderHotbar();
+    }
   });
 }
 
@@ -537,6 +556,16 @@ function toggleInventory() {
   }
   if (inventoryOpen) {
     renderInventoryGrid();
+    // Position popup next to button
+    const btn = document.getElementById('inventory-btn');
+    if (btn) {
+      const rect = btn.getBoundingClientRect();
+      const panel = document.querySelector('.inventory-panel');
+      if (panel) {
+        panel.style.left = (rect.left - 320) + 'px'; // to the left of button
+        panel.style.top = (rect.top - 400) + 'px'; // above the button
+      }
+    }
   }
 }
 
@@ -551,35 +580,61 @@ function renderInventoryGrid() {
     return;
   }
 
-  playerInventory.forEach((petal, idx) => {
-    const item = document.createElement('div');
-    item.className = 'inventory-item';
-    item.style.borderColor = RARITY_COLORS[petal.rarity];
-    
-    item.innerHTML = `
-      <img src="${petal.icon}" alt="${petal.name}" class="inventory-item-icon">
-      <div class="inventory-item-info">
-        <div class="inventory-item-name">${petal.name}</div>
-        <div class="inventory-item-rarity" style="color: ${RARITY_COLORS[petal.rarity]}">${petal.rarity}</div>
-        <div class="inventory-item-qty">×${petal.quantity}</div>
-      </div>
-    `;
-
-    // Add tooltip
-    item.addEventListener('mouseenter', (e) => {
-      showTooltip(e, petal);
-    });
-    item.addEventListener('mouseleave', hideTooltip);
-
-    // Drag to hotbar
-    item.draggable = true;
-    item.addEventListener('dragstart', (e) => {
-      e.dataTransfer.effectAllowed = 'move';
-      e.dataTransfer.setData('text/plain', JSON.stringify({ type: 'inventory', index: idx }));
-    });
-
-    grid.appendChild(item);
+  // Group by rarity
+  const byRarity = {};
+  playerInventory.forEach(petal => {
+    if (!byRarity[petal.rarity]) {
+      byRarity[petal.rarity] = [];
+    }
+    byRarity[petal.rarity].push(petal);
   });
+
+  // Rarity order
+  const rarityOrder = ['Common', 'Uncommon', 'Rare', 'Legendary', 'Mythical', 'Godly'];
+  
+  for (const rarity of rarityOrder) {
+    const petals = byRarity[rarity];
+    if (!petals) continue;
+
+    const rarityLabel = document.createElement('div');
+    rarityLabel.className = 'inventory-rarity-label';
+    rarityLabel.style.color = RARITY_COLORS[rarity];
+    rarityLabel.textContent = rarity;
+    grid.appendChild(rarityLabel);
+
+    const rarityGrid = document.createElement('div');
+    rarityGrid.className = 'inventory-rarity-grid';
+
+    petals.forEach((petal, idx) => {
+      const item = document.createElement('div');
+      item.className = 'inventory-item';
+      item.style.borderColor = RARITY_COLORS[petal.rarity];
+      item.style.backgroundColor = RARITY_COLORS[petal.rarity] + '40';
+      
+      item.innerHTML = `
+        <img src="${petal.icon}" alt="${petal.name}" class="inventory-item-icon" onerror="this.style.display='none'">
+        <div class="inventory-item-label">${petal.name}</div>
+        <div class="inventory-item-qty">×${petal.quantity}</div>
+      `;
+
+      // Add tooltip
+      item.addEventListener('mouseenter', (e) => {
+        showTooltip(e, petal);
+      });
+      item.addEventListener('mouseleave', hideTooltip);
+
+      // Drag to hotbar
+      item.draggable = true;
+      item.addEventListener('dragstart', (e) => {
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', JSON.stringify({ type: 'inventory', petal: petal }));
+      });
+
+      rarityGrid.appendChild(item);
+    });
+
+    grid.appendChild(rarityGrid);
+  }
 }
 
 function createHotbarUI() {
@@ -609,10 +664,7 @@ function createHotbarUI() {
     slot.appendChild(qty);
     slot.appendChild(label);
 
-    // Click to use
-    slot.addEventListener('click', () => useHotbarSlot(i));
-
-    // Drag and drop
+    // Drag and drop - accept items from inventory
     slot.addEventListener('dragover', (e) => {
       e.preventDefault();
       e.dataTransfer.dropEffect = 'move';
@@ -628,8 +680,27 @@ function createHotbarUI() {
       slot.classList.remove('drag-over');
       const data = JSON.parse(e.dataTransfer.getData('text/plain'));
       if (data.type === 'inventory') {
-        equipToHotbar(data.index, i);
+        equipToHotbar(data.petal, i);
+      } else if (data.type === 'hotbar') {
+        // Swap between hotbar slots
+        const tempPetal = hotbar[i];
+        hotbar[i] = hotbar[data.slot];
+        hotbar[data.slot] = tempPetal;
+        renderHotbar();
       }
+    });
+
+    // Allow dragging FROM hotbar
+    slot.addEventListener('dragstart', (e) => {
+      const petal = hotbar[i];
+      if (!petal) return;
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', JSON.stringify({ type: 'hotbar', slot: i }));
+      slot.style.opacity = '0.5';
+    });
+
+    slot.addEventListener('dragend', () => {
+      slot.style.opacity = '1';
     });
 
     hotbarContainer.appendChild(slot);
@@ -638,25 +709,14 @@ function createHotbarUI() {
   document.body.appendChild(hotbarContainer);
 }
 
-function equipToHotbar(inventoryIndex, hotbarSlot) {
-  if (inventoryIndex < 0 || inventoryIndex >= playerInventory.length) return;
-  if (hotbarSlot < 0 || hotbarSlot >= 8) return;
+function equipToHotbar(petal, hotbarSlot) {
+  if (!petal || hotbarSlot < 0 || hotbarSlot >= 8) return;
 
-  const petal = playerInventory[inventoryIndex];
   hotbar[hotbarSlot] = petal;
   renderHotbar();
 
   // Tell server
-  socket.emit('equipPetal', { inventoryIndex, hotbarSlot });
-}
-
-function useHotbarSlot(slotIndex) {
-  const petal = hotbar[slotIndex];
-  if (!petal) return;
-
-  // Use the petal (would call server eventually)
-  console.log('Using petal:', petal.name);
-  socket.emit('usePetal', { hotbarSlot: slotIndex });
+  socket.emit('equipPetal', { petalInstanceId: petal.instanceId, hotbarSlot });
 }
 
 function renderHotbar() {
@@ -669,13 +729,15 @@ function renderHotbar() {
     if (!petal) {
       iconEl.innerHTML = '';
       qtyEl.innerHTML = '';
-      slot.style.borderColor = '#444';
+      slot.style.borderColor = '#333';
+      slot.style.backgroundColor = 'rgba(30, 30, 30, 0.5)';
       return;
     }
 
-    iconEl.innerHTML = `<img src="${petal.icon}" alt="${petal.name}">`;
-    qtyEl.textContent = petal.quantity > 1 ? petal.quantity : '';
+    iconEl.innerHTML = `<img src="${petal.icon}" alt="${petal.name}" onerror="this.style.display='none'">`;
+    qtyEl.textContent = petal.quantity > 1 ? `×${petal.quantity}` : '';
     slot.style.borderColor = RARITY_COLORS[petal.rarity];
+    slot.style.backgroundColor = RARITY_COLORS[petal.rarity] + '30';
   }
 }
 
@@ -715,7 +777,7 @@ function createInventoryButton() {
   btn.id = 'inventory-btn';
   btn.className = 'inventory-btn';
   btn.title = 'Open Inventory (E)';
-  btn.innerHTML = '<img src="/assets/inventory-icon.png" alt="Inventory">';
+  btn.innerHTML = '<img src="/assets/inventory-icon.png" alt="Inventory" onerror="this.textContent=\'📦\'">';
   
   document.body.appendChild(btn);
 
@@ -1017,7 +1079,8 @@ joinBtn.addEventListener('click', () => {
     const testPetal1 = createPetal('basic_heal', 'Common');
     const testPetal2 = createPetal('speed_boost', 'Uncommon');
     const testPetal3 = createPetal('damage_petal', 'Rare');
-    playerInventory = [testPetal1, testPetal2, testPetal3];
+    const testPetal4 = createPetal('basic_heal', 'Legendary');
+    playerInventory = [testPetal1, testPetal2, testPetal3, testPetal4];
     renderInventoryGrid();
     
     setupSocket(name, DEFAULT_BACKEND);
@@ -1038,13 +1101,6 @@ window.addEventListener('keydown', (e) => {
   // Inventory toggle with E key
   if (e.key.toLowerCase() === 'e') {
     toggleInventory();
-    return;
-  }
-  
-  // Hotbar slots 1-8
-  if (e.key >= '1' && e.key <= '8') {
-    const slot = parseInt(e.key) - 1;
-    useHotbarSlot(slot);
     return;
   }
   
