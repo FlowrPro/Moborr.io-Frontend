@@ -1,4 +1,5 @@
 // Petal system - Categories are organizational, petals are specific items
+// This file is used by BOTH client and server
 
 // Rarity multipliers - each rarity is 3x stronger than the previous
 const RARITY_MULTIPLIERS = {
