@@ -13,6 +13,23 @@ let loadingScreen = null;
 let socket = null;
 let myId = null;
 
+// Player image
+let playerImage = null;
+function loadPlayerImage() {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      playerImage = img;
+      resolve();
+    };
+    img.onerror = () => {
+      console.warn('Failed to load player image, will use fallback');
+      resolve(); // resolve anyway to not block game
+    };
+    img.src = '/assets/player.png';
+  });
+}
+
 // Game state
 const players = new Map(); // id -> player object
 const pendingInputs = [];
@@ -405,7 +422,9 @@ joinBtn.addEventListener('click', () => {
   if (!name) return;
   titleScreen.classList.add('hidden');
   showLoading(name);
-  setupSocket(name, DEFAULT_BACKEND);
+  loadPlayerImage().then(() => {
+    setupSocket(name, DEFAULT_BACKEND);
+  });
 });
 
 // protect typing so movement keys aren't swallowed
@@ -430,95 +449,26 @@ window.addEventListener('keyup', (e) => {
   }
 });
 
-// Smoothing helper - hermite interpolation for smooth motion
-function hermiteInterp(p0, p1, v0, v1, t) {
-  const t2 = t * t;
-  const t3 = t2 * t;
-  const mt = 1 - t;
-  const mt2 = mt * mt;
-  const mt3 = mt2 * mt;
-  
-  return mt3 * p0 + 3 * mt2 * t * p1 + 3 * mt * t2 * v0 + t3 * v1;
-}
-
-// Avatar drawing with bobbing and blinking
-function drawPlayerAvatar(screenX, screenY, radius, p, isLocal, blinkClosedAmount, bobOffset) {
-  const faceColor = '#17b84a';
-  const outerGold = '#d3b34a';
-  const innerGold = '#e6cf78';
-
-  // outer rim
-  ctx.beginPath();
-  ctx.fillStyle = outerGold;
-  ctx.arc(screenX, screenY + bobOffset, radius + 8, 0, Math.PI * 2);
-  ctx.fill();
-
-  // inner rim
-  ctx.beginPath();
-  ctx.fillStyle = innerGold;
-  ctx.arc(screenX, screenY + bobOffset, radius + 4.5, 0, Math.PI * 2);
-  ctx.fill();
-
-  // face
-  ctx.beginPath();
-  ctx.fillStyle = faceColor;
-  ctx.arc(screenX, screenY + bobOffset, radius, 0, Math.PI * 2);
-  ctx.fill();
-
-  // outline
-  ctx.beginPath();
-  ctx.lineWidth = 2;
-  ctx.strokeStyle = '#000';
-  ctx.arc(screenX, screenY + bobOffset, radius, 0, Math.PI * 2);
-  ctx.stroke();
-
-  // eyes
-  const eyeOffsetX = Math.max(8, radius * 0.48);
-  const eyeOffsetY = -Math.max(6, radius * 0.18);
-  const eyeW = Math.max(8, radius * 0.48);
-  const eyeH = Math.max(12, radius * 0.8);
-
-  function drawEye(cx, cy, closedAmount) {
-    const visibleH = Math.max(0.06, 1 - closedAmount); // small slit allowed
+// Avatar drawing with bobbing using image
+function drawPlayerAvatar(screenX, screenY, radius, p, isLocal, bobOffset) {
+  if (playerImage) {
+    ctx.save();
+    ctx.globalAlpha = 0.95;
+    const diameter = radius * 2;
+    ctx.drawImage(playerImage, screenX - radius, screenY - radius + bobOffset, diameter, diameter);
+    ctx.restore();
+  } else {
+    // Fallback to circle if image not loaded
     ctx.beginPath();
-    ctx.ellipse(cx, cy, eyeW * 0.5, eyeH * 0.5 * visibleH, 0, 0, Math.PI * 2);
-    ctx.fillStyle = '#000';
+    ctx.fillStyle = '#17b84a';
+    ctx.arc(screenX, screenY + bobOffset, radius, 0, Math.PI * 2);
     ctx.fill();
-
-    if (visibleH > 0.12) {
-      ctx.beginPath();
-      ctx.ellipse(cx - eyeW * 0.18, cy - eyeH * 0.16 * visibleH, eyeW * 0.18, eyeH * 0.28 * visibleH, 0, 0, Math.PI * 2);
-      ctx.fillStyle = '#fff';
-      ctx.fill();
-    }
-
-    // subtle inner stroke
     ctx.beginPath();
-    ctx.ellipse(cx, cy, eyeW * 0.36, eyeH * 0.36 * visibleH, 0, 0, Math.PI * 2);
-    ctx.strokeStyle = 'rgba(255,220,120,0.08)';
-    ctx.lineWidth = 1;
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = '#000';
+    ctx.arc(screenX, screenY + bobOffset, radius, 0, Math.PI * 2);
     ctx.stroke();
   }
-
-  drawEye(screenX - eyeOffsetX, screenY + eyeOffsetY + bobOffset, blinkClosedAmount);
-  drawEye(screenX + eyeOffsetX, screenY + eyeOffsetY + bobOffset, blinkClosedAmount);
-
-  // smile
-  ctx.beginPath();
-  const smileRadius = radius * 0.60;
-  const smileY = screenY + radius * 0.28 + bobOffset;
-  ctx.lineWidth = 3;
-  ctx.strokeStyle = '#000';
-  ctx.lineCap = 'round';
-  ctx.arc(screenX, smileY, smileRadius, Math.PI * 0.18, Math.PI * 0.82);
-  ctx.stroke();
-
-  // interior highlight
-  ctx.beginPath();
-  ctx.lineWidth = 2;
-  ctx.strokeStyle = '#ffd86a';
-  ctx.arc(screenX, smileY + 1.2, smileRadius * 0.96, Math.PI * 0.2, Math.PI * 0.8);
-  ctx.stroke();
 }
 
 // Draw players (updates display smoothing, bobbing, blinking)
@@ -537,17 +487,6 @@ function drawPlayers(camX, camY, now, dtSeconds) {
     p._bobPhase += dtSeconds * (2.8 + moveFactor * 6.0);
     const bobAmp = 1.5 + moveFactor * 4.0;
     const bobOffset = Math.sin(p._bobPhase) * bobAmp;
-
-    // blinking
-    if (p._nextBlink > 0) p._nextBlink -= dtSeconds;
-    else if (p._blinkTime <= 0) { p._blinkTime = 0.20; p._nextBlink = 1.5 + Math.random() * 4.0; }
-    let blinkClosedAmount = 0;
-    if (p._blinkTime > 0) {
-      const elapsed = 0.20 - p._blinkTime;
-      const prog = Math.max(0, Math.min(1, elapsed / 0.20));
-      blinkClosedAmount = Math.sin(prog * Math.PI);
-      p._blinkTime -= dtSeconds;
-    }
 
     // smoothing / display pos using interpolation
     if (p.id === myId) {
@@ -581,7 +520,7 @@ function drawPlayers(camX, camY, now, dtSeconds) {
     const screen = worldToScreen(p.dispX, p.dispY, camX, camY);
     if (screen.x < -150 || screen.x > viewport.w + 150 || screen.y < -150 || screen.y > viewport.h + 150) continue;
 
-    drawPlayerAvatar(screen.x, screen.y, PLAYER_RADIUS, p, p.id === myId, blinkClosedAmount, Math.sin(p._bobPhase) * (1.5 + moveFactor * 3.0));
+    drawPlayerAvatar(screen.x, screen.y, PLAYER_RADIUS, p, p.id === myId, Math.sin(p._bobPhase) * (1.5 + moveFactor * 3.0));
 
     // name
     ctx.fillStyle = 'rgba(255,255,255,0.95)';
