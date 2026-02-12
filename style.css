@@ -240,10 +240,10 @@ canvas{
   position: relative;
   width: 60px;
   height: 60px;
-  background: rgba(50, 50, 50, 0.8);
-  border: 2px solid #444;
+  background: rgba(30, 30, 30, 0.5);
+  border: 2px solid #333;
   border-radius: 8px;
-  cursor: pointer;
+  cursor: default;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -252,9 +252,8 @@ canvas{
 }
 
 .hotbar-slot:hover {
-  background: rgba(60, 60, 60, 0.9);
-  border-color: #666;
-  transform: scale(1.05);
+  background: rgba(40, 40, 40, 0.6);
+  border-color: #555;
 }
 
 .hotbar-slot.drag-over {
@@ -341,126 +340,181 @@ canvas{
   inset: 0;
   z-index: 50;
   display: flex;
-  align-items: center;
-  justify-content: center;
+  pointer-events: none;
 }
 
 .inventory-container.hidden {
   display: none;
 }
 
-.inventory-overlay {
-  position: absolute;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.6);
-  backdrop-filter: blur(4px);
-  display: flex;
-  align-items: center;
-  justify-content: center;
+.inventory-container.hidden .inventory-panel {
+  pointer-events: none;
+}
+
+.inventory-container:not(.hidden) {
+  pointer-events: auto;
 }
 
 .inventory-panel {
-  background: linear-gradient(135deg, rgba(40, 30, 25, 0.95), rgba(50, 35, 28, 0.95));
-  border: 2px solid rgba(21, 230, 196, 0.3);
+  position: fixed;
+  pointer-events: auto;
+  background: linear-gradient(135deg, rgba(60, 80, 120, 0.95), rgba(40, 60, 100, 0.95));
+  border: 3px solid rgba(100, 150, 255, 0.6);
   border-radius: 12px;
-  width: 90%;
-  max-width: 700px;
-  max-height: 80vh;
+  width: 380px;
+  max-height: 600px;
   display: flex;
   flex-direction: column;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.8);
+  backdrop-filter: blur(10px);
 }
 
 .inventory-header {
-  padding: 20px;
-  border-bottom: 1px solid rgba(21, 230, 196, 0.2);
+  padding: 16px;
+  border-bottom: 2px solid rgba(100, 150, 255, 0.3);
   display: flex;
   justify-content: space-between;
   align-items: center;
+  background: rgba(30, 50, 80, 0.6);
 }
 
 .inventory-header h2 {
   margin: 0;
-  color: var(--accent-glow);
-  font-size: 24px;
+  color: #fff;
+  font-size: 20px;
+  font-weight: bold;
 }
 
 .inventory-close {
-  background: none;
+  background: rgba(255, 100, 100, 0.8);
   border: none;
-  color: var(--accent-glow);
-  font-size: 24px;
+  color: #fff;
+  font-size: 20px;
   cursor: pointer;
-  transition: transform 200ms ease;
+  transition: all 200ms ease;
+  width: 32px;
+  height: 32px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
 }
 
 .inventory-close:hover {
-  transform: scale(1.2);
+  background: rgba(255, 100, 100, 1);
+  transform: scale(1.1);
+}
+
+.inventory-hint {
+  padding: 8px 16px;
+  font-size: 12px;
+  color: #bbb;
+  background: rgba(0, 0, 0, 0.3);
+  text-align: center;
+  border-bottom: 1px solid rgba(100, 150, 255, 0.2);
 }
 
 .inventory-grid {
   flex: 1;
-  padding: 20px;
+  padding: 12px 16px;
   overflow-y: auto;
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  display: flex;
+  flex-direction: column;
   gap: 12px;
 }
 
+.inventory-grid::-webkit-scrollbar {
+  width: 8px;
+}
+
+.inventory-grid::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: 4px;
+}
+
+.inventory-grid::-webkit-scrollbar-thumb {
+  background: rgba(100, 150, 255, 0.5);
+  border-radius: 4px;
+}
+
+.inventory-grid::-webkit-scrollbar-thumb:hover {
+  background: rgba(100, 150, 255, 0.8);
+}
+
 .inventory-empty {
-  grid-column: 1 / -1;
   text-align: center;
   padding: 40px 20px;
   color: #999;
-  font-size: 16px;
+  font-size: 14px;
+}
+
+.inventory-rarity-label {
+  font-size: 13px;
+  font-weight: bold;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  padding: 4px 0;
+  margin-top: 4px;
+  border-bottom: 2px solid;
+  opacity: 0.9;
+}
+
+.inventory-rarity-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
+  gap: 8px;
 }
 
 .inventory-item {
-  background: rgba(60, 50, 45, 0.8);
-  border: 2px solid #444;
+  background: rgba(60, 50, 45, 0.9);
+  border: 3px solid #444;
   border-radius: 8px;
-  padding: 12px;
-  cursor: move;
+  padding: 8px;
+  cursor: grab;
   transition: all 200ms ease;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 8px;
+  gap: 4px;
+  aspect-ratio: 1;
+  justify-content: center;
+  position: relative;
 }
 
 .inventory-item:hover {
-  background: rgba(70, 60, 55, 0.9);
-  transform: translateY(-2px);
+  background: rgba(70, 60, 55, 0.95);
+  transform: translateY(-3px);
   box-shadow: 0 8px 20px rgba(0, 0, 0, 0.4);
+  cursor: grabbing;
 }
 
 .inventory-item-icon {
-  width: 80px;
-  height: 80px;
+  width: 70px;
+  height: 70px;
   object-fit: contain;
+  max-width: 90%;
+  max-height: 60%;
 }
 
-.inventory-item-info {
+.inventory-item-label {
+  font-weight: bold;
+  color: #fff;
+  font-size: 11px;
   text-align: center;
+  line-height: 1.2;
   width: 100%;
 }
 
-.inventory-item-name {
-  font-weight: bold;
-  color: #fff;
-  font-size: 14px;
-  margin-bottom: 4px;
-}
-
-.inventory-item-rarity {
-  font-size: 12px;
-  font-weight: 600;
-  margin-bottom: 4px;
-}
-
 .inventory-item-qty {
-  font-size: 12px;
+  font-size: 10px;
   color: #bbb;
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  background: rgba(0, 0, 0, 0.7);
+  padding: 2px 3px;
+  border-radius: 2px;
 }
 
 /* === TOOLTIP === */
@@ -531,7 +585,7 @@ canvas{
   }
   
   .inventory-panel {
-    width: 95%;
-    max-height: 90vh;
+    width: 90%;
+    max-width: 90vw;
   }
 }
