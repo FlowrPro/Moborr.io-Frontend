@@ -236,19 +236,6 @@ function checkWallCollision(x, y, radius) {
   return false;
 }
 
-// Input state
-const keys = {};
-function getInputVector() {
-  let x = 0, y = 0;
-  if (keys.w || keys.ArrowUp) y -= 1;
-  if (keys.s || keys.ArrowDown) y += 1;
-  if (keys.a || keys.ArrowLeft) x -= 1;
-  if (keys.d || keys.ArrowRight) x += 1;
-  const len = Math.hypot(x, y);
-  if (len > 1e-6) { x /= len; y /= len; }
-  return { x, y };
-}
-
 // Simple spatial grid for collision optimization
 class SpatialGrid {
   constructor(cellSize) {
@@ -910,8 +897,8 @@ function drawMinimap(camX, camY) {
   roundRect(ctx, x + 0.5, y + 0.5, mmW - 1, mmH - 1, 6);
   ctx.stroke();
 
-  // Draw walls on minimap
-  ctx.fillStyle = 'rgba(0,0,0,0.8)';
+  // Draw walls on minimap - solid black, no overlapping darkness
+  ctx.fillStyle = '#000000';
   for (const wall of WALLS) {
     const mmX = x + (wall.x / MAP.width) * mmW;
     const mmY = y + (wall.y / MAP.height) * mmH;
