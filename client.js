@@ -1,4 +1,4 @@
-// Moborr.io client — smooth movement with maze walls
+// Moborr.io client — FIXED: smooth movement with proper prediction/reconciliation, grass, minimap, bob & blink
 const DEFAULT_BACKEND = 'https://moborr-io-backend.onrender.com';
 
 const canvas = document.getElementById('gameCanvas');
@@ -14,21 +14,22 @@ let socket = null;
 let myId = null;
 
 // Game state
-const players = new Map();
+const players = new Map(); // id -> player object
 const pendingInputs = [];
-let mazeWalls = [];
+let walls = []; // wall rectangles from server
+let mapBounds = { w: 12000, h: 12000, padding: 16 };
 
 // Networking / rates
-const SEND_RATE = 30;
+const SEND_RATE = 30; // inputs per second (client -> server)
 const INPUT_DT = 1 / SEND_RATE;
-const SERVER_TICK_RATE = 30;
-const SPEED = 260;
+const SERVER_TICK_RATE = 30; // server snapshot rate (should match server)
+const SPEED = 260; // px/sec (must match server)
 
-// Avatar
-const PLAYER_RADIUS = 26;
+// Avatar / visuals
+const PLAYER_RADIUS = 26; // size similar to florr.io
 
 // Map
-const MAP = { width: 18000, height: 18000, padding: 300 };
+const MAP = { width: 12000, height: 12000, padding: 16 };
 
 let localState = { x: MAP.width / 2, y: MAP.height / 2, vx: 0, vy: 0 };
 let inputSeq = 0;
@@ -45,12 +46,11 @@ function getInputVector() {
   if (len > 1e-6) { x /= len; y /= len; }
   return { x, y };
 }
-
 function createInterp() {
   return { targetX: 0, targetY: 0, startX: 0, startY: 0, startTime: 0, endTime: 0 };
 }
 
-// --- Grass pattern ---
+// --- Grass pattern setup ---
 let grassPattern = null;
 let grassPatternSize = 128;
 
@@ -61,15 +61,18 @@ function createGrassPattern() {
   c.height = grassPatternSize;
   const g = c.getContext('2d');
 
+  // base green
   g.fillStyle = '#4aa04a';
   g.fillRect(0, 0, c.width, c.height);
 
+  // subtle darker stripes
   g.fillStyle = 'rgba(38, 94, 38, 0.06)';
   for (let i = 0; i < 6; i++) {
     const y = Math.random() * c.height;
     g.fillRect(0, y, c.width, 1 + Math.random() * 2);
   }
 
+  // blades of grass
   for (let i = 0; i < c.width * c.height / 120; i++) {
     const x = Math.random() * c.width;
     const y = Math.random() * c.height;
@@ -84,6 +87,7 @@ function createGrassPattern() {
     g.stroke();
   }
 
+  // small flowers/dots
   for (let i = 0; i < 8; i++) {
     g.fillStyle = ['#ffd24a', '#ffe08b', '#ffd1e6'][Math.floor(Math.random() * 3)];
     g.beginPath();
@@ -96,7 +100,7 @@ function createGrassPattern() {
   grassPattern = ctx.createPattern(c, 'repeat');
 }
 
-// Loading overlay
+// Loading overlay (created dynamically to avoid covering title on load)
 function createLoadingOverlay() {
   if (loadingScreen) return;
   const overlay = document.createElement('div');
@@ -110,25 +114,13 @@ function createLoadingOverlay() {
 
   const avatar = document.createElement('div');
   avatar.className = 'avatar';
-  const eyeL = document.createElement('div');
-  eyeL.className = 'eye left';
-  const eyeR = document.createElement('div');
-  eyeR.className = 'eye right';
-  avatar.appendChild(eyeL);
-  avatar.appendChild(eyeR);
+  const eyeL = document.createElement('div'); eyeL.className = 'eye left';
+  const eyeR = document.createElement('div'); eyeR.className = 'eye right';
+  avatar.appendChild(eyeL); avatar.appendChild(eyeR);
 
-  const main = document.createElement('div');
-  main.className = 'loading-title';
-  main.id = 'loading-main';
-  main.textContent = 'Connecting...';
-  const sub = document.createElement('div');
-  sub.className = 'loading-sub';
-  sub.id = 'loading-sub';
-  sub.textContent = 'Preparing the world';
-  const uname = document.createElement('div');
-  uname.className = 'loading-username';
-  uname.id = 'loading-username';
-  uname.textContent = '';
+  const main = document.createElement('div'); main.className = 'loading-title'; main.id = 'loading-main'; main.textContent = 'Connecting...';
+  const sub = document.createElement('div'); sub.className = 'loading-sub'; sub.id = 'loading-sub'; sub.textContent = 'Preparing the world';
+  const uname = document.createElement('div'); uname.className = 'loading-username'; uname.id = 'loading-username'; uname.textContent = '';
 
   inner.appendChild(avatar);
   inner.appendChild(main);
@@ -138,7 +130,6 @@ function createLoadingOverlay() {
 
   loadingScreen = overlay;
 }
-
 function showLoading(username) {
   createLoadingOverlay();
   const main = loadingScreen.querySelector('#loading-main');
@@ -149,7 +140,6 @@ function showLoading(username) {
   if (uname) uname.textContent = username || '';
   if (!document.body.contains(loadingScreen)) document.body.appendChild(loadingScreen);
 }
-
 function setLoadingError(text) {
   createLoadingOverlay();
   const main = loadingScreen.querySelector('#loading-main');
@@ -160,13 +150,11 @@ function setLoadingError(text) {
   if (uname) uname.textContent = '';
   if (!document.body.contains(loadingScreen)) document.body.appendChild(loadingScreen);
 }
-
 function hideLoading() {
-  if (loadingScreen && document.body.contains(loadingScreen)) {
-    document.body.removeChild(loadingScreen);
-  }
+  if (loadingScreen && document.body.contains(loadingScreen)) document.body.removeChild(loadingScreen);
 }
 
+// Typing guard
 function isTyping() {
   const ae = document.activeElement;
   if (!ae) return false;
@@ -192,11 +180,10 @@ function resizeCanvas() {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   createGrassPattern();
 }
-
 window.addEventListener('resize', resizeCanvas);
 resizeCanvas();
 
-// Draw background with grass
+// Grass background draw
 function drawBackground(camX, camY, vw, vh) {
   if (!grassPattern) {
     ctx.fillStyle = '#4aa04a';
@@ -206,10 +193,9 @@ function drawBackground(camX, camY, vw, vh) {
   try {
     if (typeof grassPattern.setTransform === 'function') {
       const t = new DOMMatrix();
-      const ox = -(camX % grassPatternSize);
-      const oy = -(camY % grassPatternSize);
-      t.e = ox;
-      t.f = oy;
+      const ox = - (camX % grassPatternSize);
+      const oy = - (camY % grassPatternSize);
+      t.e = ox; t.f = oy;
       grassPattern.setTransform(t);
     }
   } catch (err) {
@@ -226,35 +212,30 @@ function drawBackground(camX, camY, vw, vh) {
   ctx.fillRect(0, 0, vw, vh);
 }
 
-// Draw maze walls
-function drawMazeWalls(camX, camY, vw, vh) {
+// Draw walls in world space
+function drawWalls(camX, camY, vw, vh) {
   ctx.save();
-  ctx.fillStyle = '#5a4a3a';
-  ctx.strokeStyle = 'rgba(0,0,0,0.4)';
-  ctx.lineWidth = 1;
-
-  for (const wall of mazeWalls) {
-    if (wall.points && Array.isArray(wall.points)) {
-      // Polygon wall
-      ctx.beginPath();
-      ctx.moveTo(wall.points[0].x - camX, wall.points[0].y - camY);
-      for (let i = 1; i < wall.points.length; i++) {
-        ctx.lineTo(wall.points[i].x - camX, wall.points[i].y - camY);
-      }
-      ctx.closePath();
-      ctx.fill();
-      ctx.stroke();
-    } else if (wall.x !== undefined && wall.w !== undefined) {
-      // Rectangle wall
-      ctx.fillRect(wall.x - camX, wall.y - camY, wall.w, wall.h);
-      ctx.strokeRect(wall.x - camX, wall.y - camY, wall.w, wall.h);
-    }
+  ctx.fillStyle = '#5b4a3a';
+  ctx.strokeStyle = '#3d2817';
+  ctx.lineWidth = 2;
+  
+  for (const wall of walls) {
+    // Convert world coords to screen coords
+    const screenX = wall.x - camX;
+    const screenY = wall.y - camY;
+    
+    // Only draw if visible
+    if (screenX + wall.w < -50 || screenX > vw + 50 ||
+        screenY + wall.h < -50 || screenY > vh + 50) continue;
+    
+    ctx.fillRect(screenX, screenY, wall.w, wall.h);
+    ctx.strokeRect(screenX, screenY, wall.w, wall.h);
   }
-
+  
   ctx.restore();
 }
 
-// Networking
+// Networking / socket
 function setupSocket(username, serverUrl) {
   if (!serverUrl) serverUrl = DEFAULT_BACKEND;
   try {
@@ -286,13 +267,15 @@ function setupSocket(username, serverUrl) {
     setLoadingError('Disconnected from server');
   });
 
-  socket.on('mazeWalls', (walls) => {
-    mazeWalls = walls;
-  });
-
-  socket.on('currentPlayers', (list) => {
+  socket.on('currentPlayers', (data) => {
     players.clear();
-    list.forEach(p => {
+    
+    // Handle both old and new message formats
+    const playerList = Array.isArray(data) ? data : (data.players || []);
+    walls = (data && data.walls) || walls;
+    mapBounds = (data && data.mapBounds) || mapBounds;
+    
+    playerList.forEach(p => {
       players.set(p.id, {
         id: p.id,
         username: p.username,
@@ -300,6 +283,7 @@ function setupSocket(username, serverUrl) {
         y: p.y,
         vx: p.vx || 0,
         vy: p.vy || 0,
+        radius: p.radius || 15,
         color: p.color || '#29a',
         interp: createInterp(),
         dispX: p.x,
@@ -309,10 +293,8 @@ function setupSocket(username, serverUrl) {
         _blinkTime: 0
       });
       if (p.id === myId) {
-        localState.x = p.x;
-        localState.y = p.y;
-        localState.vx = p.vx || 0;
-        localState.vy = p.vy || 0;
+        // initialize localState to server-provided spawn
+        localState.x = p.x; localState.y = p.y; localState.vx = p.vx || 0; localState.vy = p.vy || 0;
       }
     });
 
@@ -337,6 +319,7 @@ function setupSocket(username, serverUrl) {
       y: p.y,
       vx: p.vx || 0,
       vy: p.vy || 0,
+      radius: p.radius || 15,
       color: p.color || '#29a',
       interp: createInterp(),
       dispX: p.x,
@@ -353,6 +336,10 @@ function setupSocket(username, serverUrl) {
 
   socket.on('stateSnapshot', (data) => {
     const now = Date.now();
+    
+    // Update walls if provided
+    if (data.walls) walls = data.walls;
+    
     for (const sp of data.players) {
       const existing = players.get(sp.id);
       if (!existing) {
@@ -363,6 +350,7 @@ function setupSocket(username, serverUrl) {
           y: sp.y,
           vx: sp.vx,
           vy: sp.vy,
+          radius: sp.radius || 15,
           color: sp.color || '#29a',
           interp: createInterp(),
           dispX: sp.x,
@@ -375,47 +363,42 @@ function setupSocket(username, serverUrl) {
       }
 
       if (sp.id === myId) {
+        // authoritative server position for me: reconcile
         const serverSeq = sp.lastProcessedInput || 0;
 
-        existing.x = sp.x;
-        existing.y = sp.y;
-        existing.vx = sp.vx;
-        existing.vy = sp.vy;
+        // update authoritative values
+        existing.x = sp.x; existing.y = sp.y; existing.vx = sp.vx; existing.vy = sp.vy;
 
-        localState.x = sp.x;
-        localState.y = sp.y;
-        localState.vx = sp.vx;
-        localState.vy = sp.vy;
-
+        // set localState to server position, then reapply pending inputs (reconciliation)
+        localState.x = sp.x; localState.y = sp.y; localState.vx = sp.vx; localState.vy = sp.vy;
         let i = 0;
         while (i < pendingInputs.length && pendingInputs[i].seq <= serverSeq) i++;
         pendingInputs.splice(0, i);
-        for (const inpt of pendingInputs)
-          applyInputToState(localState, inpt.input, inpt.dt);
+        for (const inpt of pendingInputs) applyInputToState(localState, inpt.input, inpt.dt);
 
+        // Update player's authoritative fields
         existing.x = localState.x;
         existing.y = localState.y;
         existing.vx = localState.vx;
         existing.vy = localState.vy;
 
+        // Set smooth interpolation target for visual smoothing
         const interp = existing.interp || createInterp();
         interp.startX = interp.targetX || existing.x;
         interp.startY = interp.targetY || existing.y;
         interp.targetX = existing.x;
         interp.targetY = existing.y;
         interp.startTime = now;
-        interp.endTime = now + 40;
+        interp.endTime = now + 40; // smooth over 40ms
         existing.interp = interp;
       } else {
+        // remote player: set interpolation targets
         const interp = existing.interp || createInterp();
-        interp.startX = existing.x;
-        interp.startY = existing.y;
-        interp.targetX = sp.x;
-        interp.targetY = sp.y;
+        interp.startX = existing.x; interp.startY = existing.y;
+        interp.targetX = sp.x; interp.targetY = sp.y;
         interp.startTime = now;
         interp.endTime = now + (1000 / SERVER_TICK_RATE) * 1.1;
-        existing.vx = sp.vx;
-        existing.vy = sp.vy;
+        existing.vx = sp.vx; existing.vy = sp.vy;
         existing.x = sp.x;
         existing.y = sp.y;
         existing.interp = interp;
@@ -424,15 +407,17 @@ function setupSocket(username, serverUrl) {
   });
 }
 
+// Apply input to a predicted state (client-side prediction)
 function applyInputToState(state, input, dt) {
   state.vx = input.x * SPEED;
   state.vy = input.y * SPEED;
   state.x += state.vx * dt;
   state.y += state.vy * dt;
-  state.x = Math.max(MAP.padding, Math.min(MAP.width - MAP.padding, state.x));
-  state.y = Math.max(MAP.padding, Math.min(MAP.height - MAP.padding, state.y));
+  state.x = Math.max(mapBounds.padding, Math.min(mapBounds.w - mapBounds.padding, state.x));
+  state.y = Math.max(mapBounds.padding, Math.min(mapBounds.h - mapBounds.padding, state.y));
 }
 
+// Input loop (ensure single interval)
 let sendInterval = null;
 function startInputLoop() {
   if (!socket || sendInterval) return;
@@ -441,23 +426,18 @@ function startInputLoop() {
     inputSeq++;
     socket.emit('input', { seq: inputSeq, dt: INPUT_DT, input });
     pendingInputs.push({ seq: inputSeq, dt: INPUT_DT, input });
+    // apply prediction locally
     applyInputToState(localState, input, INPUT_DT);
     const me = players.get(myId);
-    if (me) {
-      me.x = localState.x;
-      me.y = localState.y;
-      me.vx = localState.vx;
-      me.vy = localState.vy;
-    }
+    if (me) { me.x = localState.x; me.y = localState.y; me.vx = localState.vx; me.vy = localState.vy; }
   }, 1000 / SEND_RATE);
 }
-
 function stopInputLoop() {
   if (sendInterval) clearInterval(sendInterval);
   sendInterval = null;
 }
 
-// UI
+// UI wiring
 joinBtn.addEventListener('click', () => {
   const name = (usernameInput.value || 'Player').trim();
   if (!name) return;
@@ -466,6 +446,7 @@ joinBtn.addEventListener('click', () => {
   setupSocket(name, DEFAULT_BACKEND);
 });
 
+// protect typing so movement keys aren't swallowed
 usernameInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') joinBtn.click();
   e.stopPropagation();
@@ -473,56 +454,59 @@ usernameInput.addEventListener('keydown', (e) => {
 usernameInput.addEventListener('keypress', (e) => e.stopPropagation());
 usernameInput.addEventListener('keyup', (e) => e.stopPropagation());
 
+// keyboard handlers (ignore if typing)
 window.addEventListener('keydown', (e) => {
   if (isTyping()) return;
-  if (['w', 'a', 's', 'd', 'ArrowUp', 'ArrowLeft', 'ArrowDown', 'ArrowRight'].includes(e.key)) {
-    keys[e.key] = true;
-    e.preventDefault();
+  if (['w','a','s','d','ArrowUp','ArrowLeft','ArrowDown','ArrowRight'].includes(e.key)) {
+    keys[e.key] = true; e.preventDefault();
   }
 });
-
 window.addEventListener('keyup', (e) => {
   if (isTyping()) return;
-  if (['w', 'a', 's', 'd', 'ArrowUp', 'ArrowLeft', 'ArrowDown', 'ArrowRight'].includes(e.key)) {
-    keys[e.key] = false;
-    e.preventDefault();
+  if (['w','a','s','d','ArrowUp','ArrowLeft','ArrowDown','ArrowRight'].includes(e.key)) {
+    keys[e.key] = false; e.preventDefault();
   }
 });
 
-// Avatar drawing
+// Avatar drawing with bobbing and blinking
 function drawPlayerAvatar(screenX, screenY, radius, p, isLocal, blinkClosedAmount, bobOffset) {
   const faceColor = '#17b84a';
   const outerGold = '#d3b34a';
   const innerGold = '#e6cf78';
 
+  // outer rim
   ctx.beginPath();
   ctx.fillStyle = outerGold;
   ctx.arc(screenX, screenY + bobOffset, radius + 8, 0, Math.PI * 2);
   ctx.fill();
 
+  // inner rim
   ctx.beginPath();
   ctx.fillStyle = innerGold;
   ctx.arc(screenX, screenY + bobOffset, radius + 4.5, 0, Math.PI * 2);
   ctx.fill();
 
+  // face
   ctx.beginPath();
   ctx.fillStyle = faceColor;
   ctx.arc(screenX, screenY + bobOffset, radius, 0, Math.PI * 2);
   ctx.fill();
 
+  // outline
   ctx.beginPath();
   ctx.lineWidth = 2;
   ctx.strokeStyle = '#000';
   ctx.arc(screenX, screenY + bobOffset, radius, 0, Math.PI * 2);
   ctx.stroke();
 
+  // eyes
   const eyeOffsetX = Math.max(8, radius * 0.48);
   const eyeOffsetY = -Math.max(6, radius * 0.18);
   const eyeW = Math.max(8, radius * 0.48);
   const eyeH = Math.max(12, radius * 0.8);
 
   function drawEye(cx, cy, closedAmount) {
-    const visibleH = Math.max(0.06, 1 - closedAmount);
+    const visibleH = Math.max(0.06, 1 - closedAmount); // small slit allowed
     ctx.beginPath();
     ctx.ellipse(cx, cy, eyeW * 0.5, eyeH * 0.5 * visibleH, 0, 0, Math.PI * 2);
     ctx.fillStyle = '#000';
@@ -535,6 +519,7 @@ function drawPlayerAvatar(screenX, screenY, radius, p, isLocal, blinkClosedAmoun
       ctx.fill();
     }
 
+    // subtle inner stroke
     ctx.beginPath();
     ctx.ellipse(cx, cy, eyeW * 0.36, eyeH * 0.36 * visibleH, 0, 0, Math.PI * 2);
     ctx.strokeStyle = 'rgba(255,220,120,0.08)';
@@ -545,8 +530,9 @@ function drawPlayerAvatar(screenX, screenY, radius, p, isLocal, blinkClosedAmoun
   drawEye(screenX - eyeOffsetX, screenY + eyeOffsetY + bobOffset, blinkClosedAmount);
   drawEye(screenX + eyeOffsetX, screenY + eyeOffsetY + bobOffset, blinkClosedAmount);
 
+  // smile
   ctx.beginPath();
-  const smileRadius = radius * 0.6;
+  const smileRadius = radius * 0.60;
   const smileY = screenY + radius * 0.28 + bobOffset;
   ctx.lineWidth = 3;
   ctx.strokeStyle = '#000';
@@ -554,6 +540,7 @@ function drawPlayerAvatar(screenX, screenY, radius, p, isLocal, blinkClosedAmoun
   ctx.arc(screenX, smileY, smileRadius, Math.PI * 0.18, Math.PI * 0.82);
   ctx.stroke();
 
+  // interior highlight
   ctx.beginPath();
   ctx.lineWidth = 2;
   ctx.strokeStyle = '#ffd86a';
@@ -561,6 +548,7 @@ function drawPlayerAvatar(screenX, screenY, radius, p, isLocal, blinkClosedAmoun
   ctx.stroke();
 }
 
+// Draw players (updates display smoothing, bobbing, blinking)
 let lastFrameTime = performance.now();
 function drawPlayers(camX, camY, now, dtSeconds) {
   for (const p of players.values()) {
@@ -570,41 +558,45 @@ function drawPlayers(camX, camY, now, dtSeconds) {
     if (p._nextBlink === undefined) p._nextBlink = 1 + Math.random() * 4;
     if (p._blinkTime === undefined) p._blinkTime = 0;
 
+    // bobbing
     const speedNow = Math.hypot(p.vx || 0, p.vy || 0);
     const moveFactor = Math.min(1, speedNow / SPEED);
     p._bobPhase += dtSeconds * (2.8 + moveFactor * 6.0);
     const bobAmp = 1.5 + moveFactor * 4.0;
     const bobOffset = Math.sin(p._bobPhase) * bobAmp;
 
+    // blinking
     if (p._nextBlink > 0) p._nextBlink -= dtSeconds;
-    else if (p._blinkTime <= 0) {
-      p._blinkTime = 0.2;
-      p._nextBlink = 1.5 + Math.random() * 4.0;
-    }
+    else if (p._blinkTime <= 0) { p._blinkTime = 0.20; p._nextBlink = 1.5 + Math.random() * 4.0; }
     let blinkClosedAmount = 0;
     if (p._blinkTime > 0) {
-      const elapsed = 0.2 - p._blinkTime;
-      const prog = Math.max(0, Math.min(1, elapsed / 0.2));
+      const elapsed = 0.20 - p._blinkTime;
+      const prog = Math.max(0, Math.min(1, elapsed / 0.20));
       blinkClosedAmount = Math.sin(prog * Math.PI);
       p._blinkTime -= dtSeconds;
     }
 
+    // smoothing / display pos using interpolation
     if (p.id === myId) {
+      // For local player: use interpolation to smooth movements from server corrections
       if (p.interp && now < p.interp.endTime) {
         const t = (now - p.interp.startTime) / Math.max(1, p.interp.endTime - p.interp.startTime);
         const tt = Math.max(0, Math.min(1, t));
+        // Smooth step interpolation for natural motion
         const ease = tt * tt * (3 - 2 * tt);
         p.dispX = p.interp.startX + (p.interp.targetX - p.interp.startX) * ease;
         p.dispY = p.interp.startY + (p.interp.targetY - p.interp.startY) * ease;
       } else {
+        // Already at target
         p.dispX = localState.x;
         p.dispY = localState.y;
       }
     } else {
+      // remote players: smooth interpolation
       if (p.interp && now < p.interp.endTime) {
         const t = (now - p.interp.startTime) / Math.max(1, p.interp.endTime - p.interp.startTime);
         const tt = Math.max(0, Math.min(1, t));
-        const ease = tt * tt * (3 - 2 * tt);
+        const ease = tt * tt * (3 - 2 * tt); // smoothstep
         p.dispX = p.interp.startX + (p.interp.targetX - p.interp.startX) * ease;
         p.dispY = p.interp.startY + (p.interp.targetY - p.interp.startY) * ease;
       } else {
@@ -614,11 +606,11 @@ function drawPlayers(camX, camY, now, dtSeconds) {
     }
 
     const screen = worldToScreen(p.dispX, p.dispY, camX, camY);
-    if (screen.x < -150 || screen.x > viewport.w + 150 || screen.y < -150 || screen.y > viewport.h + 150)
-      continue;
+    if (screen.x < -150 || screen.x > viewport.w + 150 || screen.y < -150 || screen.y > viewport.h + 150) continue;
 
     drawPlayerAvatar(screen.x, screen.y, PLAYER_RADIUS, p, p.id === myId, blinkClosedAmount, Math.sin(p._bobPhase) * (1.5 + moveFactor * 3.0));
 
+    // name
     ctx.fillStyle = 'rgba(255,255,255,0.95)';
     ctx.font = '12px system-ui, Arial';
     ctx.textAlign = 'center';
@@ -626,6 +618,7 @@ function drawPlayers(camX, camY, now, dtSeconds) {
   }
 }
 
+// Minimap & helpers
 function roundRect(ctx, x, y, w, h, r) {
   const rad = Math.min(r, w / 2, h / 2);
   ctx.beginPath();
@@ -664,6 +657,20 @@ function drawMinimap(camX, camY) {
   roundRect(ctx, x + 0.5, y + 0.5, mmW - 1, mmH - 1, 6);
   ctx.stroke();
 
+  // Draw walls on minimap
+  ctx.fillStyle = 'rgba(91,74,58,0.8)';
+  ctx.strokeStyle = 'rgba(61,40,23,0.6)';
+  ctx.lineWidth = 0.5;
+  for (const wall of walls) {
+    const wx = x + (wall.x / MAP.width) * mmW;
+    const wy = y + (wall.y / MAP.height) * mmH;
+    const ww = (wall.w / MAP.width) * mmW;
+    const wh = (wall.h / MAP.height) * mmH;
+    
+    ctx.fillRect(wx, wy, ww, wh);
+    ctx.strokeRect(wx, wy, ww, wh);
+  }
+
   for (const p of players.values()) {
     const px = x + (p.x / MAP.width) * mmW;
     const py = y + (p.y / MAP.height) * mmH;
@@ -699,14 +706,16 @@ function drawMinimap(camX, camY) {
   ctx.restore();
 }
 
+// Coordinate helpers
 function worldToScreen(wx, wy, camX, camY) {
   return { x: wx - camX, y: wy - camY };
 }
 
+// Render loop with fixed timestep for smoother visuals
 function render() {
   const nowPerf = performance.now();
   let dt = (nowPerf - lastFrameTime) / 1000;
-  if (dt > 0.05) dt = 0.05;
+  if (dt > 0.05) dt = 0.05; // cap at 50ms to prevent big jumps
   lastFrameTime = nowPerf;
 
   const me = players.get(myId);
@@ -716,20 +725,21 @@ function render() {
   const camY = Math.max(0, Math.min(MAP.height - viewport.h, cy));
 
   drawBackground(camX, camY, viewport.w, viewport.h);
-  drawMazeWalls(camX, camY, viewport.w, viewport.h);
+  drawWalls(camX, camY, viewport.w, viewport.h);
   drawPlayers(camX, camY, Date.now(), dt);
   drawMinimap(camX, camY);
 
   requestAnimationFrame(render);
 }
-
 requestAnimationFrame(render);
 
+// Cleanup
 window.addEventListener('beforeunload', () => {
   stopInputLoop();
   if (socket) socket.disconnect();
 });
 
+// On load
 window.addEventListener('load', () => {
   usernameInput.focus();
   resizeCanvas();
