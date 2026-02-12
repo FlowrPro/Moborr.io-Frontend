@@ -1,4 +1,4 @@
-// Moborr.io client — FIXED: smooth movement with proper prediction/reconciliation, grass, minimap, bob & blink
+// Moborr.io client — smooth movement, no bobbing
 const DEFAULT_BACKEND = 'https://moborr-io-backend.onrender.com';
 
 const canvas = document.getElementById('gameCanvas');
@@ -272,10 +272,7 @@ function setupSocket(username, serverUrl) {
         color: p.color || '#29a',
         interp: createInterp(),
         dispX: p.x,
-        dispY: p.y,
-        _bobPhase: Math.random() * Math.PI * 2,
-        _nextBlink: 1 + Math.random() * 4,
-        _blinkTime: 0
+        dispY: p.y
       });
       if (p.id === myId) {
         // initialize localState to server-provided spawn
@@ -307,10 +304,7 @@ function setupSocket(username, serverUrl) {
       color: p.color || '#29a',
       interp: createInterp(),
       dispX: p.x,
-      dispY: p.y,
-      _bobPhase: Math.random() * Math.PI * 2,
-      _nextBlink: 1 + Math.random() * 4,
-      _blinkTime: 0
+      dispY: p.y
     });
   });
 
@@ -333,10 +327,7 @@ function setupSocket(username, serverUrl) {
           color: sp.color || '#29a',
           interp: createInterp(),
           dispX: sp.x,
-          dispY: sp.y,
-          _bobPhase: Math.random() * Math.PI * 2,
-          _nextBlink: 1 + Math.random() * 4,
-          _blinkTime: 0
+          dispY: sp.y
         });
         continue;
       }
@@ -368,7 +359,7 @@ function setupSocket(username, serverUrl) {
         interp.targetX = existing.x;
         interp.targetY = existing.y;
         interp.startTime = now;
-        interp.endTime = now + 40; // smooth over 40ms
+        interp.endTime = now + 100; // longer interpolation window = smoother
         existing.interp = interp;
       } else {
         // remote player: set interpolation targets
@@ -376,7 +367,7 @@ function setupSocket(username, serverUrl) {
         interp.startX = existing.x; interp.startY = existing.y;
         interp.targetX = sp.x; interp.targetY = sp.y;
         interp.startTime = now;
-        interp.endTime = now + (1000 / SERVER_TICK_RATE) * 1.1;
+        interp.endTime = now + 100; // longer interpolation window = smoother
         existing.vx = sp.vx; existing.vy = sp.vy;
         existing.x = sp.x;
         existing.y = sp.y;
@@ -449,44 +440,34 @@ window.addEventListener('keyup', (e) => {
   }
 });
 
-// Avatar drawing with bobbing using image
-function drawPlayerAvatar(screenX, screenY, radius, p, isLocal, bobOffset) {
+// Avatar drawing - no bobbing, just draw the image
+function drawPlayerAvatar(screenX, screenY, radius, p) {
   if (playerImage) {
     ctx.save();
     ctx.globalAlpha = 0.95;
     const diameter = radius * 2;
-    ctx.drawImage(playerImage, screenX - radius, screenY - radius + bobOffset, diameter, diameter);
+    ctx.drawImage(playerImage, screenX - radius, screenY - radius, diameter, diameter);
     ctx.restore();
   } else {
     // Fallback to circle if image not loaded
     ctx.beginPath();
     ctx.fillStyle = '#17b84a';
-    ctx.arc(screenX, screenY + bobOffset, radius, 0, Math.PI * 2);
+    ctx.arc(screenX, screenY, radius, 0, Math.PI * 2);
     ctx.fill();
     ctx.beginPath();
     ctx.lineWidth = 2;
     ctx.strokeStyle = '#000';
-    ctx.arc(screenX, screenY + bobOffset, radius, 0, Math.PI * 2);
+    ctx.arc(screenX, screenY, radius, 0, Math.PI * 2);
     ctx.stroke();
   }
 }
 
-// Draw players (updates display smoothing, bobbing, blinking)
+// Draw players (smooth interpolation)
 let lastFrameTime = performance.now();
-function drawPlayers(camX, camY, now, dtSeconds) {
+function drawPlayers(camX, camY, now) {
   for (const p of players.values()) {
     if (p.dispX === undefined) p.dispX = p.x;
     if (p.dispY === undefined) p.dispY = p.y;
-    if (p._bobPhase === undefined) p._bobPhase = Math.random() * Math.PI * 2;
-    if (p._nextBlink === undefined) p._nextBlink = 1 + Math.random() * 4;
-    if (p._blinkTime === undefined) p._blinkTime = 0;
-
-    // bobbing
-    const speedNow = Math.hypot(p.vx || 0, p.vy || 0);
-    const moveFactor = Math.min(1, speedNow / SPEED);
-    p._bobPhase += dtSeconds * (2.8 + moveFactor * 6.0);
-    const bobAmp = 1.5 + moveFactor * 4.0;
-    const bobOffset = Math.sin(p._bobPhase) * bobAmp;
 
     // smoothing / display pos using interpolation
     if (p.id === myId) {
@@ -494,8 +475,10 @@ function drawPlayers(camX, camY, now, dtSeconds) {
       if (p.interp && now < p.interp.endTime) {
         const t = (now - p.interp.startTime) / Math.max(1, p.interp.endTime - p.interp.startTime);
         const tt = Math.max(0, Math.min(1, t));
-        // Smooth step interpolation for natural motion
-        const ease = tt * tt * (3 - 2 * tt);
+        // Cubic easing for very smooth motion
+        const ease = tt < 0.5 
+          ? 4 * tt * tt * tt 
+          : 1 - Math.pow(-2 * tt + 2, 3) / 2;
         p.dispX = p.interp.startX + (p.interp.targetX - p.interp.startX) * ease;
         p.dispY = p.interp.startY + (p.interp.targetY - p.interp.startY) * ease;
       } else {
@@ -508,7 +491,10 @@ function drawPlayers(camX, camY, now, dtSeconds) {
       if (p.interp && now < p.interp.endTime) {
         const t = (now - p.interp.startTime) / Math.max(1, p.interp.endTime - p.interp.startTime);
         const tt = Math.max(0, Math.min(1, t));
-        const ease = tt * tt * (3 - 2 * tt); // smoothstep
+        // Cubic easing for very smooth motion
+        const ease = tt < 0.5 
+          ? 4 * tt * tt * tt 
+          : 1 - Math.pow(-2 * tt + 2, 3) / 2;
         p.dispX = p.interp.startX + (p.interp.targetX - p.interp.startX) * ease;
         p.dispY = p.interp.startY + (p.interp.targetY - p.interp.startY) * ease;
       } else {
@@ -520,7 +506,7 @@ function drawPlayers(camX, camY, now, dtSeconds) {
     const screen = worldToScreen(p.dispX, p.dispY, camX, camY);
     if (screen.x < -150 || screen.x > viewport.w + 150 || screen.y < -150 || screen.y > viewport.h + 150) continue;
 
-    drawPlayerAvatar(screen.x, screen.y, PLAYER_RADIUS, p, p.id === myId, Math.sin(p._bobPhase) * (1.5 + moveFactor * 3.0));
+    drawPlayerAvatar(screen.x, screen.y, PLAYER_RADIUS, p);
 
     // name
     ctx.fillStyle = 'rgba(255,255,255,0.95)';
@@ -623,7 +609,7 @@ function render() {
   const camY = Math.max(0, Math.min(MAP.height - viewport.h, cy));
 
   drawBackground(camX, camY, viewport.w, viewport.h);
-  drawPlayers(camX, camY, Date.now(), dt);
+  drawPlayers(camX, camY, Date.now());
   drawMinimap(camX, camY);
 
   requestAnimationFrame(render);
