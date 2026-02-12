@@ -49,82 +49,72 @@ const MAP = { width: 12000, height: 12000, padding: 16 };
 let localState = { x: MAP.width / 2, y: MAP.height / 2, vx: 0, vy: 0 };
 let inputSeq = 0;
 
-// Wall system
+// Wall system - Large winding snake-like walls
 const WALLS = [];
 function generateMazeWalls() {
-  // Generate maze-like walls with pockets and open spaces
-  // Similar to the florr.io style maze pattern
+  // Create 2-3 massive, winding walls that form a snake pattern across the map
+  // Wall thickness is very large (600px), and they wind across the map
   
-  const wallThickness = 120; // Width of walls
-  const spacing = 300; // Space between wall sections
+  const wallThickness = 600; // Very thick walls
+  const mapW = MAP.width;
+  const mapH = MAP.height;
   
-  // Horizontal wall segments (creating vertical corridors)
-  for (let x = 0; x < MAP.width; x += spacing * 2) {
-    WALLS.push({
-      x: x,
-      y: MAP.height * 0.2,
-      width: spacing + 200,
-      height: wallThickness,
-      rotation: 0
-    });
-    
-    WALLS.push({
-      x: x + spacing,
-      y: MAP.height * 0.5,
-      width: spacing + 200,
-      height: wallThickness,
-      rotation: 0
-    });
-    
-    WALLS.push({
-      x: x,
-      y: MAP.height * 0.8,
-      width: spacing + 200,
-      height: wallThickness,
-      rotation: 0
-    });
-  }
+  // Main horizontal snake wall - winds up and down
+  // Bottom wall running left to right, then winds back
+  WALLS.push({
+    x: 0,
+    y: mapH * 0.7,
+    width: mapW * 0.4,
+    height: wallThickness
+  });
   
-  // Vertical wall segments (creating horizontal corridors)
-  for (let y = 0; y < MAP.height; y += spacing * 2) {
-    WALLS.push({
-      x: MAP.width * 0.15,
-      y: y,
-      width: wallThickness,
-      height: spacing + 200,
-      rotation: 0
-    });
-    
-    WALLS.push({
-      x: MAP.width * 0.5,
-      y: y + spacing,
-      width: wallThickness,
-      height: spacing + 200,
-      rotation: 0
-    });
-    
-    WALLS.push({
-      x: MAP.width * 0.85,
-      y: y,
-      width: wallThickness,
-      height: spacing + 200,
-      rotation: 0
-    });
-  }
+  // First turn - vertical wall going up
+  WALLS.push({
+    x: mapW * 0.35,
+    y: mapH * 0.15,
+    width: wallThickness,
+    height: mapH * 0.6
+  });
   
-  // Add some diagonal/offset walls for more complex layout
-  for (let i = 0; i < 4; i++) {
-    const baseY = i * (MAP.height / 4) + 400;
-    const baseX = i * (MAP.width / 4) + 500;
-    
-    WALLS.push({
-      x: baseX,
-      y: baseY,
-      width: spacing + 150,
-      height: wallThickness,
-      rotation: 0
-    });
-  }
+  // Second horizontal segment - goes right
+  WALLS.push({
+    x: mapW * 0.35,
+    y: mapH * 0.15,
+    width: mapW * 0.45,
+    height: wallThickness
+  });
+  
+  // Second turn - vertical wall going down
+  WALLS.push({
+    x: mapW * 0.75,
+    y: mapH * 0.15,
+    width: wallThickness,
+    height: mapH * 0.65
+  });
+  
+  // Third horizontal segment - goes left across the bottom
+  WALLS.push({
+    x: mapW * 0.25,
+    y: mapH * 0.75,
+    width: mapW * 0.6,
+    height: wallThickness
+  });
+  
+  // Additional winding section - creates more complexity
+  WALLS.push({
+    x: mapW * 0.2,
+    y: mapH * 0.35,
+    width: wallThickness,
+    height: mapH * 0.35
+  });
+  
+  // Final winding wall
+  WALLS.push({
+    x: mapW * 0.2,
+    y: mapH * 0.35,
+    width: mapW * 0.35,
+    height: wallThickness
+  });
 }
 
 function getWallCollisionBox(wall) {
