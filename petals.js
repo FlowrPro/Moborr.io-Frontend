@@ -92,7 +92,16 @@ const PETALS = {
     damage: 20,
     health: 20
   },
-
+  // ADD YOUR NEW PETAL HERE:
+fireball: {
+  id: 'fireball',
+  name: 'Fireball',
+  category: PETAL_CATEGORIES.DAMAGER,
+  icon: '/assets/petals/fireball.png',
+  description: 'A burning projectile that explodes on impact',
+  damage: 30,        // base damage at Common (will be multiplied by rarity)
+  health: 35         // petal health/durability
+},
   // ============ SHOOTABLE CATEGORY ============
   pebble_shot: {
     id: 'pebble_shot',
