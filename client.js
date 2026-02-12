@@ -182,6 +182,39 @@ function getWallCollisionBox(wall) {
   };
 }
 
+// Swept circle-rectangle collision: checks if moving from oldPos to newPos collides
+function getCollisionNormal(oldX, oldY, newX, newY, radius) {
+  for (const wall of WALLS) {
+    const box = getWallCollisionBox(wall);
+    
+    // Find closest point on wall box to the new position
+    const closestX = Math.max(box.x, Math.min(newX, box.x + box.width));
+    const closestY = Math.max(box.y, Math.min(newY, box.y + box.height));
+    
+    const distX = newX - closestX;
+    const distY = newY - closestY;
+    const distance = Math.sqrt(distX * distX + distY * distY);
+    
+    if (distance < radius) {
+      // Collision detected - return collision info
+      const len = Math.hypot(distX, distY);
+      const nx = len > 1e-6 ? distX / len : 0;
+      const ny = len > 1e-6 ? distY / len : 0;
+      const penetration = radius - distance;
+      
+      return {
+        collided: true,
+        nx, ny,
+        penetration,
+        wall,
+        distance
+      };
+    }
+  }
+  
+  return { collided: false };
+}
+
 function checkWallCollision(x, y, radius) {
   // Check if a point + radius collides with any wall
   for (const wall of WALLS) {
@@ -214,6 +247,74 @@ function getInputVector() {
   const len = Math.hypot(x, y);
   if (len > 1e-6) { x /= len; y /= len; }
   return { x, y };
+}
+
+// Simple spatial grid for collision optimization
+class SpatialGrid {
+  constructor(cellSize) {
+    this.cellSize = cellSize;
+    this.grid = new Map();
+  }
+  
+  getKey(x, y) {
+    return `${Math.floor(x / this.cellSize)},${Math.floor(y / this.cellSize)}`;
+  }
+  
+  getNearbyWalls(x, y, radius) {
+    const nearbyWalls = new Set();
+    const searchRadius = Math.ceil(radius / this.cellSize) + 1;
+    const cx = Math.floor(x / this.cellSize);
+    const cy = Math.floor(y / this.cellSize);
+    
+    for (let dx = -searchRadius; dx <= searchRadius; dx++) {
+      for (let dy = -searchRadius; dy <= searchRadius; dy++) {
+        const key = `${cx + dx},${cy + dy}`;
+        const wallsInCell = this.grid.get(key);
+        if (wallsInCell) {
+          wallsInCell.forEach(w => nearbyWalls.add(w));
+        }
+      }
+    }
+    
+    return Array.from(nearbyWalls);
+  }
+  
+  build(walls) {
+    this.grid.clear();
+    for (const wall of walls) {
+      const minCellX = Math.floor(wall.x / this.cellSize);
+      const minCellY = Math.floor(wall.y / this.cellSize);
+      const maxCellX = Math.floor((wall.x + wall.width) / this.cellSize);
+      const maxCellY = Math.floor((wall.y + wall.height) / this.cellSize);
+      
+      for (let cx = minCellX; cx <= maxCellX; cx++) {
+        for (let cy = minCellY; cy <= maxCellY; cy++) {
+          const key = `${cx},${cy}`;
+          if (!this.grid.has(key)) this.grid.set(key, []);
+          this.grid.get(key).push(wall);
+        }
+      }
+    }
+  }
+}
+
+const wallGrid = new SpatialGrid(1000); // 1000px cells
+
+function checkWallCollisionOptimized(x, y, radius) {
+  const nearbyWalls = wallGrid.getNearbyWalls(x, y, radius);
+  for (const wall of nearbyWalls) {
+    const closestX = Math.max(wall.x, Math.min(x, wall.x + wall.width));
+    const closestY = Math.max(wall.y, Math.min(y, wall.y + wall.height));
+    
+    const distX = x - closestX;
+    const distY = y - closestY;
+    const distance = Math.sqrt(distX * distX + distY * distY);
+    
+    if (distance < radius) {
+      return true;
+    }
+  }
+  return false;
 }
 
 // --- Grass pattern setup ---
@@ -432,28 +533,36 @@ function setupSocket(username, serverUrl) {
   });
 
   socket.on('currentPlayers', (list) => {
+    if (!Array.isArray(list)) {
+      console.error('Invalid currentPlayers data');
+      return;
+    }
+    
     players.clear();
     list.forEach(p => {
+      // Validate player data
+      if (!p.id || typeof p.id !== 'string') return;
+      
       players.set(p.id, {
         id: p.id,
-        username: p.username,
-        x: p.x,
-        y: p.y,
-        vx: p.vx || 0,
-        vy: p.vy || 0,
+        username: p.username || 'Unknown',
+        x: Number(p.x) || 0,
+        y: Number(p.y) || 0,
+        vx: Number(p.vx) || 0,
+        vy: Number(p.vy) || 0,
         color: p.color || '#29a',
-        dispX: p.x,
-        dispY: p.y,
+        dispX: Number(p.x) || 0,
+        dispY: Number(p.y) || 0,
         lastUpdateTime: Date.now(),
-        smoothX: p.x,
-        smoothY: p.y,
+        smoothX: Number(p.x) || 0,
+        smoothY: Number(p.y) || 0,
         correctionDist: 0
       });
       if (p.id === myId) {
-        localState.x = p.x;
-        localState.y = p.y;
-        localState.vx = p.vx || 0;
-        localState.vy = p.vy || 0;
+        localState.x = Number(p.x) || 0;
+        localState.y = Number(p.y) || 0;
+        localState.vx = Number(p.vx) || 0;
+        localState.vy = Number(p.vy) || 0;
       }
     });
 
@@ -471,46 +580,60 @@ function setupSocket(username, serverUrl) {
   });
 
   socket.on('newPlayer', (p) => {
+    if (!p || !p.id) {
+      console.error('Invalid newPlayer data');
+      return;
+    }
+    
     players.set(p.id, {
       id: p.id,
-      username: p.username,
-      x: p.x,
-      y: p.y,
-      vx: p.vx || 0,
-      vy: p.vy || 0,
+      username: p.username || 'Unknown',
+      x: Number(p.x) || 0,
+      y: Number(p.y) || 0,
+      vx: Number(p.vx) || 0,
+      vy: Number(p.vy) || 0,
       color: p.color || '#29a',
-      dispX: p.x,
-      dispY: p.y,
+      dispX: Number(p.x) || 0,
+      dispY: Number(p.y) || 0,
       lastUpdateTime: Date.now(),
-      smoothX: p.x,
-      smoothY: p.y,
+      smoothX: Number(p.x) || 0,
+      smoothY: Number(p.y) || 0,
       correctionDist: 0
     });
   });
 
   socket.on('playerLeft', (id) => {
-    players.delete(id);
+    if (typeof id === 'string') {
+      players.delete(id);
+    }
   });
 
   socket.on('stateSnapshot', (data) => {
+    if (!data || !Array.isArray(data.players)) {
+      console.error('Invalid stateSnapshot data');
+      return;
+    }
+    
     const now = Date.now();
     for (const sp of data.players) {
+      if (!sp.id || typeof sp.id !== 'string') continue;
+      
       const existing = players.get(sp.id);
       
       if (!existing) {
         players.set(sp.id, {
           id: sp.id,
-          username: sp.username,
-          x: sp.x,
-          y: sp.y,
-          vx: sp.vx || 0,
-          vy: sp.vy || 0,
+          username: sp.username || 'Unknown',
+          x: Number(sp.x) || 0,
+          y: Number(sp.y) || 0,
+          vx: Number(sp.vx) || 0,
+          vy: Number(sp.vy) || 0,
           color: sp.color || '#29a',
-          dispX: sp.x,
-          dispY: sp.y,
+          dispX: Number(sp.x) || 0,
+          dispY: Number(sp.y) || 0,
           lastUpdateTime: now,
-          smoothX: sp.x,
-          smoothY: sp.y,
+          smoothX: Number(sp.x) || 0,
+          smoothY: Number(sp.y) || 0,
           correctionDist: 0
         });
         continue;
@@ -519,10 +642,10 @@ function setupSocket(username, serverUrl) {
       if (sp.id === myId) {
         // Local player reconciliation
         const serverSeq = sp.lastProcessedInput || 0;
-        localState.x = sp.x;
-        localState.y = sp.y;
-        localState.vx = sp.vx || 0;
-        localState.vy = sp.vy || 0;
+        localState.x = Number(sp.x) || 0;
+        localState.y = Number(sp.y) || 0;
+        localState.vx = Number(sp.vx) || 0;
+        localState.vy = Number(sp.vy) || 0;
 
         let i = 0;
         while (i < pendingInputs.length && pendingInputs[i].seq <= serverSeq) i++;
@@ -538,43 +661,80 @@ function setupSocket(username, serverUrl) {
         existing.lastUpdateTime = now;
       } else {
         // Remote players: smooth velocity changes gradually
-        const oldVx = existing.vx;
-        const oldVy = existing.vy;
+        existing.x = Number(sp.x) || 0;
+        existing.y = Number(sp.y) || 0;
+        existing.vx = Number(sp.vx) || 0;
+        existing.vy = Number(sp.vy) || 0;
+        existing.lastUpdateTime = now;
         
         // Calculate distance from extrapolated position to actual position
         const timeSinceUpdate = (now - existing.lastUpdateTime) / 1000;
         const extrapolatedX = existing.x + existing.vx * timeSinceUpdate;
         const extrapolatedY = existing.y + existing.vy * timeSinceUpdate;
         
-        const corrDist = Math.hypot(sp.x - extrapolatedX, sp.y - extrapolatedY);
+        const corrDist = Math.hypot(existing.x - extrapolatedX, existing.y - extrapolatedY);
         existing.correctionDist = corrDist;
-
-        existing.x = sp.x;
-        existing.y = sp.y;
-        existing.vx = sp.vx || 0;
-        existing.vy = sp.vy || 0;
-        existing.smoothX = sp.x;
-        existing.smoothY = sp.y;
-        existing.lastUpdateTime = now;
       }
     }
   });
+
+  // Timeout for stale connections
+  let socketTimeout = null;
+  socket.on('connect', () => {
+    if (socketTimeout) clearTimeout(socketTimeout);
+    socketTimeout = setTimeout(() => {
+      if (socket && socket.connected) {
+        console.warn('Socket timeout - no data received');
+        socket.disconnect();
+      }
+    }, 15000);
+  });
+
+  socket.on('disconnect', () => {
+    if (socketTimeout) clearTimeout(socketTimeout);
+  });
 }
 
-// Apply input to state
+// Apply input to state with sliding collision
 function applyInputToState(state, input, dt) {
+  const oldX = state.x;
+  const oldY = state.y;
+  
   state.vx = input.x * SPEED;
   state.vy = input.y * SPEED;
-  state.x += state.vx * dt;
-  state.y += state.vy * dt;
   
-  // Check collision with walls and revert if necessary
-  if (checkWallCollision(state.x, state.y, PLAYER_RADIUS)) {
-    // Revert to previous position
-    state.x -= state.vx * dt;
-    state.y -= state.vy * dt;
+  const desiredX = state.x + state.vx * dt;
+  const desiredY = state.y + state.vy * dt;
+  
+  // Check collision
+  const collision = getCollisionNormal(state.x, state.y, desiredX, desiredY, PLAYER_RADIUS);
+  
+  if (collision.collided) {
+    // Sliding collision: move along the wall
+    const friction = 0.95; // friction factor
+    
+    // Try moving only X
+    const testX = desiredX;
+    const testY = state.y;
+    if (!checkWallCollisionOptimized(testX, testY, PLAYER_RADIUS)) {
+      state.x = testX;
+      state.y = testY;
+    } else {
+      // Try moving only Y
+      const testX2 = state.x;
+      const testY2 = desiredY;
+      if (!checkWallCollisionOptimized(testX2, testY2, PLAYER_RADIUS)) {
+        state.x = testX2;
+        state.y = testY2;
+      }
+      // else: don't move
+    }
+  } else {
+    state.x = desiredX;
+    state.y = desiredY;
   }
   
+  // Clamp to map bounds
   state.x = Math.max(MAP.padding, Math.min(MAP.width - MAP.padding, state.x));
   state.y = Math.max(MAP.padding, Math.min(MAP.height - MAP.padding, state.y));
 }
@@ -613,7 +773,8 @@ joinBtn.addEventListener('click', () => {
   titleScreen.classList.add('hidden');
   showLoading(name);
   loadPlayerImage().then(() => {
-    generateMazeWalls(); // Generate walls before game starts
+    generateMazeWalls();
+    wallGrid.build(WALLS); // Build spatial grid for collision optimization
     setupSocket(name, DEFAULT_BACKEND);
   });
 });
@@ -685,11 +846,10 @@ function drawPlayers(camX, camY, now, dtSeconds) {
       const extrapolY = p.y + p.vy * timeSinceUpdate;
       
       // Smooth damping factor - smoother the farther away the prediction is
-      const predictDist = Math.hypot(p.vx, p.vy);
       const dampFactor = Math.min(1, 1 - (p.correctionDist || 0) / 300);
       
       // Blend smoothly toward extrapolated position
-      const smoothSpeed = 0.15; // controls how fast smooth position catches up
+      const smoothSpeed = 0.15 * dampFactor; // controls how fast smooth position catches up
       p.dispX = p.smoothX + (extrapolX - p.smoothX) * smoothSpeed;
       p.dispY = p.smoothY + (extrapolY - p.smoothY) * smoothSpeed;
       
@@ -722,6 +882,7 @@ function roundRect(ctx, x, y, w, h, r) {
   ctx.closePath();
 }
 
+let minimapDirty = true;
 function drawMinimap(camX, camY) {
   const maxSize = Math.min(260, Math.floor(viewport.w * 0.28));
   const size = Math.max(120, maxSize);
