@@ -540,6 +540,9 @@ function toggleInventory() {
   if (inv) {
     inv.classList.toggle('hidden');
   }
+  // hide tooltips when inventory closes
+  if (!inventoryOpen) hideTooltip();
+
   if (inventoryOpen) {
     renderInventoryGrid();
     // Position popup centered on screen
@@ -554,6 +557,11 @@ function toggleInventory() {
 function renderInventoryGrid() {
   const grid = document.getElementById('inventory-grid');
   if (!grid) return;
+
+  // When re-rendering inventory, hide any existing tooltip to avoid showing a tooltip
+  // for an item that has just been removed/changed.
+  hideTooltip();
+  hoveredPetal = null;
 
   grid.innerHTML = '';
 
@@ -596,6 +604,9 @@ function renderInventoryGrid() {
       // mark draggable only if there is at least one quantity
       item.draggable = true;
 
+      // store instance id on element so we can compare later
+      item.dataset.instanceId = petal.instanceId;
+
       item.innerHTML = `
         <div class="inventory-item-icon">
           <img src="${petal.icon}" alt="${petal.name}" class="inventory-item-img">
@@ -604,7 +615,7 @@ function renderInventoryGrid() {
         <div class="inventory-item-qty">×${petal.quantity}</div>
       `;
 
-      // Add tooltip
+      // Add tooltip on hover
       item.addEventListener('mouseenter', (e) => {
         hoveredPetal = petal;
         showTooltip(e, petal);
@@ -708,6 +719,26 @@ function createHotbarUI() {
       }
     });
 
+    // Tooltip on hotbar hover
+    slot.addEventListener('mouseenter', (e) => {
+      const pet = hotbar[i];
+      if (pet) {
+        hoveredPetal = pet;
+        // Use the slot element as the event.target for tooltip positioning
+        showTooltip(e, pet);
+      }
+    });
+    slot.addEventListener('mouseleave', () => {
+      hoveredPetal = null;
+      hideTooltip();
+    });
+
+    // Right-click to unequip (optional UX)
+    slot.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      unequipFromHotbar(i);
+    });
+
     hotbarContainer.appendChild(slot);
   }
 
@@ -753,6 +784,10 @@ function equipToHotbar(petal, hotbarSlot) {
 
   hotbar[hotbarSlot] = hotbarPetal;
   
+  // Hide tooltip proactively when moving items so a tooltip for a removed inventory element doesn't persist.
+  hoveredPetal = null;
+  hideTooltip();
+
   renderHotbar();
   if (inventoryOpen) {
     renderInventoryGrid();
@@ -773,6 +808,11 @@ function unequipFromHotbar(hotbarSlot) {
 
   // Remove from hotbar and merge back into inventory optimistically
   hotbar[hotbarSlot] = null;
+
+  // Hide tooltip if it was showing for this hotbar item
+  hoveredPetal = null;
+  hideTooltip();
+
   mergeIntoInventory(petal);
 
   renderHotbar();
@@ -816,7 +856,9 @@ function renderHotbar() {
 
 let tooltipEl = null;
 function showTooltip(event, petal) {
-  if (tooltipEl) hideTooltip();
+  if (!petal) return;
+  // Always recreate tooltip to ensure it's positioned relative to latest element
+  hideTooltip();
 
   tooltipEl = document.createElement('div');
   tooltipEl.className = 'tooltip';
@@ -832,9 +874,20 @@ function showTooltip(event, petal) {
 
   document.body.appendChild(tooltipEl);
 
-  const rect = event.target.getBoundingClientRect();
-  tooltipEl.style.left = (rect.right + 10) + 'px';
-  tooltipEl.style.top = rect.top + 'px';
+  // Position tooltip relative to event target if available, else near mouse
+  let rect;
+  if (event && event.target && event.target.getBoundingClientRect) {
+    rect = event.target.getBoundingClientRect();
+    tooltipEl.style.left = (rect.right + 10) + 'px';
+    tooltipEl.style.top = rect.top + 'px';
+  } else if (event && typeof event.clientX === 'number') {
+    tooltipEl.style.left = (event.clientX + 12) + 'px';
+    tooltipEl.style.top = (event.clientY + 6) + 'px';
+  } else {
+    // fallback center
+    tooltipEl.style.left = '50%';
+    tooltipEl.style.top = '50%';
+  }
 }
 
 function hideTooltip() {
@@ -842,6 +895,7 @@ function hideTooltip() {
     tooltipEl.remove();
     tooltipEl = null;
   }
+  hoveredPetal = null;
 }
 
 // Inventory button
@@ -964,6 +1018,14 @@ function setupSocket(username, serverUrl) {
     if (Array.isArray(data.inventory)) {
       playerInventory = data.inventory;
       hotbar = data.hotbar || new Array(8).fill(null);
+      // When authoritative state arrives, hide tooltip if the hovered instance no longer exists.
+      if (tooltipEl) {
+        // If hoveredPetal was an inventory item that got removed, hide tooltip
+        if (hoveredPetal && !playerInventory.find(it => it.instanceId === hoveredPetal.instanceId) &&
+            !hotbar.find(it => it && it.instanceId === hoveredPetal.instanceId)) {
+          hideTooltip();
+        }
+      }
       renderHotbar();
       if (inventoryOpen) {
         renderInventoryGrid();
@@ -1202,7 +1264,7 @@ function getInputVector() {
 }
 
 // Avatar drawing
-function drawPlayerAvatar(screenX, screenY, radius, p) {
+function drawPlayerAvatar(screenX, screenY, radius, p, camX, camY) {
   if (playerImage) {
     ctx.save();
     ctx.globalAlpha = 0.95;
@@ -1219,6 +1281,67 @@ function drawPlayerAvatar(screenX, screenY, radius, p) {
     ctx.strokeStyle = '#000';
     ctx.arc(screenX, screenY, radius, 0, Math.PI * 2);
     ctx.stroke();
+  }
+
+  // If this is the local player, draw currently-equipped hotbar petals around them
+  if (p.id === myId) {
+    drawHotbarAroundPlayer(p, camX, camY);
+  }
+}
+
+// Draw the player's hotbar petals around the avatar (local player only)
+function drawHotbarAroundPlayer(playerObj, camX, camY) {
+  // Collect non-null hotbar items in display order
+  const items = hotbar.filter(h => h !== null);
+  const n = items.length;
+  if (n === 0) return;
+
+  const centerScreen = worldToScreen(playerObj.dispX, playerObj.dispY, camX, camY);
+  const orbitRadius = PLAYER_RADIUS + 18; // distance from player center to petal icon
+  const iconSize = 20;
+
+  // Start angle at -90 degrees (top)
+  const startAngle = -Math.PI / 2;
+  for (let i = 0, shownIndex = 0; i < hotbar.length; i++) {
+    const pet = hotbar[i];
+    if (!pet) continue;
+    const angle = startAngle + (2 * Math.PI) * (shownIndex / n);
+    const px = playerObj.dispX + Math.cos(angle) * orbitRadius;
+    const py = playerObj.dispY + Math.sin(angle) * orbitRadius;
+    const screen = worldToScreen(px, py, camX, camY);
+
+    // Draw a subtle background circle
+    ctx.save();
+    ctx.beginPath();
+    ctx.fillStyle = 'rgba(0,0,0,0.45)';
+    ctx.arc(screen.x, screen.y, iconSize / 2 + 4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+
+    // Draw icon if available
+    if (pet.icon) {
+      const img = new Image();
+      // Use a cached image via src set; minor overhead but simple.
+      img.src = pet.icon;
+      // drawImage only when loaded - but we can attempt to draw immediately for cached assets
+      img.onload = () => {
+        ctx.drawImage(img, screen.x - iconSize / 2, screen.y - iconSize / 2, iconSize, iconSize);
+      };
+      // attempt immediate draw (if cached)
+      try {
+        ctx.drawImage(img, screen.x - iconSize / 2, screen.y - iconSize / 2, iconSize, iconSize);
+      } catch (err) {
+        // ignore; will draw on load
+      }
+    } else {
+      // fallback: colored circle based on rarity
+      ctx.beginPath();
+      ctx.fillStyle = RARITY_COLORS[pet.rarity] || '#ddd';
+      ctx.arc(screen.x, screen.y, iconSize / 2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    shownIndex++;
   }
 }
 
@@ -1260,7 +1383,7 @@ function drawPlayers(camX, camY, now, dtSeconds) {
     const screen = worldToScreen(p.dispX, p.dispY, camX, camY);
     if (screen.x < -150 || screen.x > viewport.w + 150 || screen.y < -150 || screen.y > viewport.h + 150) continue;
 
-    drawPlayerAvatar(screen.x, screen.y, PLAYER_RADIUS, p);
+    drawPlayerAvatar(screen.x, screen.y, PLAYER_RADIUS, p, camX, camY);
 
     ctx.fillStyle = 'rgba(255,255,255,0.95)';
     ctx.font = '12px system-ui, Arial';
