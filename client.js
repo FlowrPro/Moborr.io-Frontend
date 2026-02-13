@@ -35,7 +35,7 @@ const players = new Map();
 const pendingInputs = [];
 
 // Inventory and hotbar state
-let playerInventory = []; // Array of petal instances
+let playerInventory = []; // Array of petal stack objects { instanceId, id, name, rarity, icon, quantity, ... }
 let hotbar = new Array(8).fill(null); // 8 slots, null = empty
 let selectedHotbarSlot = null;
 let inventoryOpen = false;
@@ -593,6 +593,9 @@ function renderInventoryGrid() {
       item.style.borderColor = RARITY_COLORS[petal.rarity];
       item.style.backgroundColor = RARITY_COLORS[petal.rarity] + '40';
       
+      // mark draggable only if there is at least one quantity
+      item.draggable = true;
+
       item.innerHTML = `
         <div class="inventory-item-icon">
           <img src="${petal.icon}" alt="${petal.name}" class="inventory-item-img">
@@ -610,6 +613,16 @@ function renderInventoryGrid() {
       item.addEventListener('mouseleave', () => {
         hoveredPetal = null;
         hideTooltip();
+      });
+
+      // Allow dragging from inventory into hotbar (client-side UI)
+      item.addEventListener('dragstart', (e) => {
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', JSON.stringify({ type: 'inventory', petalInstanceId: petal.instanceId }));
+        item.style.opacity = '0.5';
+      });
+      item.addEventListener('dragend', () => {
+        item.style.opacity = '1';
       });
 
       rarityGrid.appendChild(item);
@@ -661,7 +674,7 @@ function createHotbarUI() {
       slot.style.opacity = '1';
     });
 
-    // Accept drops from other hotbar slots
+    // Accept drops from other hotbar slots or inventory items
     slot.addEventListener('dragover', (e) => {
       e.preventDefault();
       e.dataTransfer.dropEffect = 'move';
@@ -684,6 +697,11 @@ function createHotbarUI() {
           hotbar[i] = hotbar[data.slot];
           hotbar[data.slot] = tempPetal;
           renderHotbar();
+        } else if (data.type === 'inventory') {
+          // Equip inventory petal into this hotbar slot (simulate pressing number)
+          const pid = data.petalInstanceId;
+          const pet = playerInventory.find(p => p.instanceId === pid);
+          if (pet) equipToHotbar(pet, i);
         }
       } catch (err) {
         console.error('Error in drop handler', err);
@@ -696,30 +714,51 @@ function createHotbarUI() {
   document.body.appendChild(hotbarContainer);
 }
 
+// Helper: merge a petal stack into inventory (by id+rarity)
+function mergeIntoInventory(petal) {
+  if (!petal) return;
+  const idx = playerInventory.findIndex(it => it.id === petal.id && it.rarity === petal.rarity);
+  if (idx !== -1) {
+    playerInventory[idx].quantity = (playerInventory[idx].quantity || 0) + (petal.quantity || 1);
+  } else {
+    const stack = { ...petal, instanceId: Math.random().toString(36).substr(2, 9) };
+    playerInventory.push(stack);
+  }
+}
+
 function equipToHotbar(petal, hotbarSlot) {
   if (!petal || hotbarSlot < 0 || hotbarSlot >= 8) return;
 
-  // If there's already a petal in this slot, return it to inventory
+  // Find inventory stack
+  const invIndex = playerInventory.findIndex(p => p.instanceId === petal.instanceId);
+  if (invIndex === -1) return;
+
+  const invItem = playerInventory[invIndex];
+
+  // If there's already a petal in this slot, return it to inventory (merge)
   if (hotbar[hotbarSlot]) {
     const unequippedPetal = hotbar[hotbarSlot];
-    playerInventory.push(unequippedPetal);
+    mergeIntoInventory(unequippedPetal);
   }
 
-  // Remove from inventory by instance ID
-  const petalIndex = playerInventory.findIndex(p => p.instanceId === petal.instanceId);
-  if (petalIndex !== -1) {
-    playerInventory.splice(petalIndex, 1);
+  // Create a new hotbar instance (single unit)
+  const hotbarPetal = { ...petal, instanceId: Math.random().toString(36).substr(2, 9), quantity: 1 };
+
+  // Decrement inventory stack or remove it
+  if (invItem.quantity > 1) {
+    invItem.quantity -= 1;
+  } else {
+    playerInventory.splice(invIndex, 1);
   }
 
-  // Equip to hotbar
-  hotbar[hotbarSlot] = petal;
+  hotbar[hotbarSlot] = hotbarPetal;
   
   renderHotbar();
   if (inventoryOpen) {
     renderInventoryGrid();
   }
 
-  // Tell server
+  // Tell server (server will emit authoritative inventory/hotbar back)
   socket.emit('equipPetal', { 
     petalInstanceId: petal.instanceId, 
     hotbarSlot 
@@ -732,9 +771,9 @@ function unequipFromHotbar(hotbarSlot) {
   const petal = hotbar[hotbarSlot];
   if (!petal) return;
 
-  // Return to inventory
-  playerInventory.push(petal);
+  // Remove from hotbar and merge back into inventory optimistically
   hotbar[hotbarSlot] = null;
+  mergeIntoInventory(petal);
 
   renderHotbar();
   if (inventoryOpen) {
@@ -761,7 +800,7 @@ function renderHotbar() {
       slot.style.borderColor = '#999';
       slot.style.backgroundColor = '#e8e8e8';
       slot.draggable = false;
-      return;
+      continue;
     }
 
     // Display petal image in hotbar with rarity coloring
@@ -920,14 +959,8 @@ function setupSocket(username, serverUrl) {
     });
   });
 
-  socket.on('playerLeft', (id) => {
-    if (typeof id === 'string') {
-      players.delete(id);
-    }
-  });
-
   socket.on('playerInventory', (data) => {
-    // Receive inventory from server
+    // Receive inventory from server (authoritative)
     if (Array.isArray(data.inventory)) {
       playerInventory = data.inventory;
       hotbar = data.hotbar || new Array(8).fill(null);
