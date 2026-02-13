@@ -41,6 +41,29 @@ let selectedHotbarSlot = null;
 let inventoryOpen = false;
 let hoveredPetal = null; // Track which petal is currently hovered
 
+// Keep last mouse position so keyboard equips can detect which inventory item is under cursor
+let lastMouseX = 0;
+let lastMouseY = 0;
+window.addEventListener('mousemove', (e) => {
+  lastMouseX = e.clientX;
+  lastMouseY = e.clientY;
+});
+
+function getInventoryPetalUnderCursor() {
+  // elementFromPoint expects client coordinates
+  try {
+    const el = document.elementFromPoint(lastMouseX, lastMouseY);
+    if (!el) return null;
+    const itemEl = el.closest && el.closest('.inventory-item');
+    if (!itemEl) return null;
+    const iid = itemEl.dataset.instanceId;
+    if (!iid) return null;
+    return playerInventory.find(p => p.instanceId === iid) || null;
+  } catch (err) {
+    return null;
+  }
+}
+
 // Networking / rates
 const SEND_RATE = 30;
 const INPUT_DT = 1 / SEND_RATE;
@@ -1232,10 +1255,20 @@ window.addEventListener('keydown', (e) => {
   }
   
   // Hotbar equip with number keys (1-8)
-  if (hoveredPetal && /^[1-8]$/.test(e.key)) {
-    const slot = parseInt(e.key) - 1; // Convert 1-8 to 0-7
-    equipToHotbar(hoveredPetal, slot);
-    return;
+  if (/^[1-8]$/.test(e.key)) {
+    // Prefer hoveredPetal (set by mouseenter on inventory items / hotbar)
+    let pet = hoveredPetal;
+
+    // If not set, and inventory is open, try to find item element under cursor.
+    if (!pet && inventoryOpen) {
+      pet = getInventoryPetalUnderCursor();
+    }
+
+    if (pet) {
+      const slot = parseInt(e.key) - 1; // Convert 1-8 to 0-7
+      equipToHotbar(pet, slot);
+      return;
+    }
   }
   
   if (['w','a','s','d','ArrowUp','ArrowLeft','ArrowDown','ArrowRight'].includes(e.key)) {
